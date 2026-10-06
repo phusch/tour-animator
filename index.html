@@ -113,6 +113,25 @@
           </select>
         </div>
 
+        <div class="row">
+          <div class="field">
+            <label for="viewMode">Ansicht</label>
+            <select id="viewMode">
+              <option value="overview">Gesamtübersicht</option>
+              <option value="follow" selected>Sanft folgen</option>
+              <option value="close">Nah dran</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="zoomLevel">Zoom</label>
+            <select id="zoomLevel">
+              <option value="wide">Weit</option>
+              <option value="medium" selected>Mittel</option>
+              <option value="near">Nah</option>
+            </select>
+          </div>
+        </div>
+
         <button id="previewBtn" class="btn primary" disabled>▶ Vorschau</button>
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
@@ -155,6 +174,8 @@
     format: document.getElementById("format"),
     duration: document.getElementById("duration"),
     style: document.getElementById("mapStyle"),
+    viewMode: document.getElementById("viewMode"),
+    zoomLevel: document.getElementById("zoomLevel"),
     preview: document.getElementById("previewBtn"),
     record: document.getElementById("recordBtn"),
     shell: document.getElementById("stageShell"),
@@ -534,12 +555,53 @@
   }
 
   function computeFollowZoom() {
-    return map?.getZoom?.() || 6;
+    const level = els.zoomLevel?.value || "medium";
+    const base =
+      totalKm > 800 ? 7.9 :
+      totalKm > 350 ? 8.5 :
+      totalKm > 120 ? 9.2 :
+      10.0;
+
+    const delta = level === "wide" ? -0.7 : level === "near" ? 0.8 : 0;
+    return base + delta;
   }
 
+  let smoothCenter = null;
+  let smoothZoom = null;
+
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
   function updateCamera(info, point) {
-    // V0.1.1: bewusst keine Kameradrehung / kein Nachführen.
-    // Die vollständige Route bleibt ruhig, nordorientiert und vollständig im Bild.
+    if(!map) return;
+
+    const mode = els.viewMode?.value || "follow";
+
+    if (mode === "overview") {
+      return; // Karte bleibt exakt in der Gesamtansicht.
+    }
+
+    let targetZoom = computeFollowZoom();
+    if (mode === "close") targetZoom += 0.9;
+
+    const target = point.coord;
+    const current = map.getCenter();
+    if (!smoothCenter) smoothCenter = [current.lng, current.lat];
+    if (!Number.isFinite(smoothZoom)) smoothZoom = map.getZoom();
+
+    // Niedrige Interpolationsrate = ruhige, weiche Fahrt.
+    const alpha = mode === "close" ? 0.075 : 0.055;
+    smoothCenter = [
+      lerp(smoothCenter[0], target[0], alpha),
+      lerp(smoothCenter[1], target[1], alpha)
+    ];
+    smoothZoom = lerp(smoothZoom, targetZoom, 0.045);
+
+    map.jumpTo({
+      center: smoothCenter,
+      zoom: smoothZoom,
+      pitch: 0,
+      bearing: 0
+    });
   }
 
   function drawBike(ctx,x,y,heading,scale=1) {
@@ -628,6 +690,9 @@
   }
 
   async function play({record=false}={}) {
+    smoothCenter = null;
+    smoothZoom = null;
+
     if(!map || routeCoords.length<2 || playing) return;
     stopAnimation();
     playing=true;
@@ -642,6 +707,21 @@
     await waitMapIdle(800);
 
     const durationSec=Number(els.duration.value)||25;
+
+    if ((els.viewMode?.value || "follow") === "overview") {
+      fitOverview(false);
+    } else {
+      const p0 = pointAt(0);
+      map.jumpTo({
+        center: p0.coord,
+        zoom: computeFollowZoom() - 0.4,
+        pitch: 0,
+        bearing: 0
+      });
+      smoothCenter = [p0.coord[0], p0.coord[1]];
+      smoothZoom = map.getZoom();
+    }
+
     const start=performance.now();
     let recorder=null, chunks=[], mimeType="", ext="webm";
 
@@ -711,7 +791,7 @@
               els.progress.value=1;
               els.preview.disabled=false;els.record.disabled=false;
               updateRouteProgress(1);
-              fitOverview(true);
+              setTimeout(()=>fitOverview(true), 650);
               resolve();
             };
             recorder.stop();
@@ -720,7 +800,7 @@
             els.progress.value=1;
             els.preview.disabled=false;els.record.disabled=false;
             updateRouteProgress(1);
-            fitOverview(true);
+            setTimeout(()=>fitOverview(true), 650);
             resolve();
           }
           return;
@@ -748,6 +828,21 @@
 
   els.format.addEventListener("change",()=>{ if(routeCoords.length) rebuildMap(); else layoutStage(); });
   els.style.addEventListener("change",()=>{ if(routeCoords.length) rebuildMap(); });
+  els.viewMode?.addEventListener("change",()=>{
+    smoothCenter=null; smoothZoom=null;
+    if(!map || !routeCoords.length) return;
+    if(els.viewMode.value==="overview") fitOverview(true);
+    else {
+      const p0=pointAt(0);
+      map.easeTo({center:p0.coord,zoom:computeFollowZoom(),pitch:0,bearing:0,duration:650});
+    }
+  });
+  els.zoomLevel?.addEventListener("change",()=>{
+    if(!map || !routeCoords.length) return;
+    smoothZoom=null;
+    if((els.viewMode?.value||"follow")==="overview") fitOverview(true);
+    else map.easeTo({zoom:computeFollowZoom() + (els.viewMode.value==="close"?0.9:0),duration:500});
+  });
   window.addEventListener("resize",()=>layoutStage());
 
   layoutStage();

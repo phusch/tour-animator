@@ -1,0 +1,8 @@
+Tour Animator V0.1.2
+
+- Ansichtsmodus: Gesamtübersicht / Sanft folgen / Nah dran
+- Zoom: Weit / Mittel / Nah
+- Standard: Sanft folgen + Mittel
+- keine Kartenrotation
+- weiche Center- und Zoom-Interpolation
+- bestehende Route-/Markerlogik aus V0.1.1 unverändert
