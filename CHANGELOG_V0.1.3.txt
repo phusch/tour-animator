@@ -1,0 +1,7 @@
+Tour Animator V0.1.3
+
+- Tagesetappen/Zwischenziele und wichtige Shaping Points werden aus den übernommenen Tour-Navigator-Punkten aufgebaut
+- beschriftete Marker auf der Karte
+- kurze Stopps/Hervorhebungen während der Fahrt
+- Einblendung des aktuellen Punktnamens im Video
+- Ansichtsmodi und sanfte Kamera aus V0.1.2 bleiben erhalten

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.1</title>
+  <title>Tour Animator V0.1.3</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -136,7 +136,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Karte bleibt für eine ruhige Animation fest ausgerichtet. Die Route wächst einmal vom Start bis zum Ziel und das Motorrad fährt synchron auf der Linie. Bei Tour-Navigator-Wegpunkten wird die Straßenlinie automatisch rekonstruiert.
+          Die Route wächst einmal vom Start bis zum Ziel. Tagesetappen und wichtige Shaping Points werden aus den Namen übernommen, als Punkte beschriftet und während der Fahrt kurz hervorgehoben.
         </div>
       </aside>
 
@@ -198,6 +198,9 @@
   let dimensions = {w:1920,h:1080};
   let totalKm = 0;
   let cumulative = [];
+  let stopEvents = [];
+  let labelFeatures = [];
+  let activeStop = null;
 
   const ROAD_STYLE = "https://tiles.openfreemap.org/styles/liberty";
   const SATELLITE_STYLE = {
@@ -230,7 +233,10 @@
         lat: Number(p.lat),
         lon: Number(p.lon ?? p.lng),
         name: String(p.name || p.q || `Punkt ${i+1}`),
-        type: String(p.type || "")
+        type: String(p.type || ""),
+        day: Number.isFinite(Number(p.day)) ? Number(p.day) : null,
+        idx: Number.isFinite(Number(p.idx)) ? Number(p.idx) : (i + 1),
+        sym: String(p.sym || "")
       }));
   }
 
@@ -283,7 +289,9 @@
       lat: Number(n.getAttribute("lat")),
       lon: Number(n.getAttribute("lon")),
       name: getName(n,i),
-      type: "gpx"
+      type: "gpx",
+      day: null,
+      idx: i + 1
     })).filter(validPoint);
 
     if (points.length > 2500) {
@@ -323,12 +331,13 @@
 
     if (routeCoords.length < 2) throw new Error("Zu wenige gültige Routenpunkte");
     prepareDistanceTable();
+    buildStopEvents();
     await rebuildMap();
     els.preview.disabled = false;
     els.record.disabled = false;
 
     const snapped = (data.geometryMode || "road") === "road" && routeCoords.length > sourcePoints.length;
-    setStatus(`${sourcePoints.length} Wegpunkte · ca. ${Math.round(totalKm)} km${snapped ? " · Straßenlinie automatisch rekonstruiert" : ""}`, "ok");
+    setStatus(`${sourcePoints.length} Wegpunkte · ca. ${Math.round(totalKm)} km · ${stopEvents.length} markierte Tages-/Shaping-Punkte${snapped ? " · Straßenlinie automatisch rekonstruiert" : ""}`, "ok");
     els.renderStatus.textContent = "Bereit";
   }
 
@@ -396,6 +405,176 @@
     const t=(target-cumulative[idx-1])/seg;
     const coord=[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
     return {coord,bearing:bearing(a,b)};
+  }
+
+
+  function classifyPoint(p) {
+    const t = String(p?.type || "").toLowerCase();
+    const generic = /^(shaping point|point|wegpunkt)\b/i.test(String(p?.name || "").trim());
+    const isStart = t === "start";
+    const isEnd = t === "destination";
+    const isMajor = !!p?.day || t === "via" || t === "destination";
+    const isMinor = t === "shaping" || t === "routepoint" || t === "trkpt" || t === "wpt" || t === "gpx";
+    return {isStart, isEnd, isMajor, isMinor, generic};
+  }
+
+  function stopKindLabel(stop) {
+    if (stop.role === "major") return stop.day ? `Tagesetappe ${stop.day}` : "Tages-/Zwischenziel";
+    return "Shaping Point";
+  }
+
+  function displayStopName(name) {
+    const s = String(name || "").trim();
+    return s.length > 40 ? s.slice(0, 38) + "…" : s;
+  }
+
+  function snapPointToRoute(coord) {
+    if (!routeCoords.length) return null;
+    let bestIndex = 0;
+    let bestScore = Infinity;
+    for (let i = 0; i < routeCoords.length; i++) {
+      const dx = routeCoords[i][0] - coord[0];
+      const dy = routeCoords[i][1] - coord[1];
+      const score = dx * dx + dy * dy;
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    return {
+      index: bestIndex,
+      coord: routeCoords[bestIndex],
+      distKm: cumulative[bestIndex] || 0
+    };
+  }
+
+  function sampleMinorStops(minor, maxCount) {
+    if (minor.length <= maxCount) return minor.slice();
+    const sampled = [];
+    const step = (minor.length - 1) / (maxCount - 1);
+    for (let i = 0; i < maxCount; i++) sampled.push(minor[Math.round(i * step)]);
+    const seen = new Set();
+    return sampled.filter(item => {
+      const key = String(item.progress.toFixed(5));
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function buildStopEvents() {
+    stopEvents = [];
+    labelFeatures = [];
+    if (!sourcePoints.length || !routeCoords.length) return;
+
+    const raw = [];
+    for (let i = 0; i < sourcePoints.length; i++) {
+      const p = sourcePoints[i];
+      const info = classifyPoint(p);
+      if (info.isStart) continue;
+      if (!(info.isMajor || info.isMinor)) continue;
+
+      const snapped = snapPointToRoute([p.lon, p.lat]);
+      if (!snapped) continue;
+
+      const progress = totalKm > 0 ? (snapped.distKm / totalKm) : 0;
+      if (progress < 0.001) continue;
+
+      raw.push({
+        name: p.name || (info.isMajor ? "Ziel" : "Shaping Point"),
+        type: p.type || "",
+        role: info.isMajor ? "major" : "minor",
+        day: p.day ?? null,
+        generic: info.generic,
+        coord: snapped.coord,
+        progress: Math.max(0, Math.min(1, progress)),
+        distKm: snapped.distKm
+      });
+    }
+
+    raw.sort((a,b) => a.progress - b.progress);
+
+    const deduped = [];
+    for (const item of raw) {
+      const prev = deduped[deduped.length - 1];
+      const minGap = item.role === "major" ? 0.008 : 0.004;
+      if (prev && Math.abs(item.progress - prev.progress) < minGap) {
+        if (item.role === "major" && prev.role !== "major") deduped[deduped.length - 1] = item;
+        continue;
+      }
+      deduped.push(item);
+    }
+
+    const major = deduped.filter(x => x.role === "major");
+    const minor = deduped.filter(x => x.role === "minor");
+    const sampledMinor = sampleMinorStops(minor, 18);
+    const keepMinor = new Set(sampledMinor.map(x => x.name + "|" + x.progress.toFixed(5)));
+    stopEvents = deduped.filter(x => x.role === "major" || keepMinor.has(x.name + "|" + x.progress.toFixed(5)));
+
+    labelFeatures = stopEvents
+      .filter(x => x.role === "major" || !x.generic)
+      .map((s, i) => ({
+        type: "Feature",
+        properties: {
+          id: i + 1,
+          name: displayStopName(s.name),
+          role: s.role,
+          kind: stopKindLabel(s)
+        },
+        geometry: {type: "Point", coordinates: s.coord}
+      }));
+  }
+
+  function buildPlaybackPlan(durationSec) {
+    const usableStops = stopEvents.filter(s => s.progress > 0.01 && s.progress < 0.995);
+    const basePause = usableStops.reduce((sum, s) => sum + (s.role === "major" ? 0.8 : 0.22), 0);
+    const maxPause = durationSec * 0.45;
+    const pauseScale = basePause > 0 ? Math.min(1, maxPause / basePause) : 0;
+    const pauses = usableStops.map(s => ({
+      ...s,
+      pauseSec: (s.role === "major" ? 0.8 : 0.22) * pauseScale
+    }));
+    const pauseSum = pauses.reduce((sum, s) => sum + s.pauseSec, 0);
+    const travelSec = Math.max(1.5, durationSec - pauseSum);
+
+    const segments = [];
+    let cursor = 0;
+    let prevProgress = 0;
+
+    for (const stop of pauses) {
+      const delta = Math.max(0, stop.progress - prevProgress);
+      const segTravel = travelSec * delta;
+      if (segTravel > 0.001) {
+        segments.push({ kind: "travel", t0: cursor, t1: cursor + segTravel, p0: prevProgress, p1: stop.progress });
+        cursor += segTravel;
+      }
+      if (stop.pauseSec > 0.01) {
+        segments.push({ kind: "hold", t0: cursor, t1: cursor + stop.pauseSec, p0: stop.progress, p1: stop.progress, stop });
+        cursor += stop.pauseSec;
+      }
+      prevProgress = stop.progress;
+    }
+
+    if (prevProgress < 1) {
+      const segTravel = travelSec * (1 - prevProgress);
+      segments.push({ kind: "travel", t0: cursor, t1: cursor + segTravel, p0: prevProgress, p1: 1 });
+      cursor += segTravel;
+    }
+
+    return {segments, durationSec, totalSec: cursor || durationSec};
+  }
+
+  function playbackState(plan, elapsedSec) {
+    const t = Math.max(0, Math.min(plan.totalSec, elapsedSec));
+    for (const seg of plan.segments) {
+      if (t <= seg.t1 + 1e-9) {
+        if (seg.kind === "hold") return {routeP: seg.p0, activeStop: seg.stop, phase: "hold"};
+        const local = seg.t1 > seg.t0 ? (t - seg.t0) / (seg.t1 - seg.t0) : 1;
+        const easedLocal = eased(local);
+        return { routeP: seg.p0 + (seg.p1 - seg.p0) * easedLocal, activeStop: null, phase: "travel" };
+      }
+    }
+    return {routeP: 1, activeStop: null, phase: "done"};
   }
 
   function dimsForFormat() {
@@ -479,6 +658,42 @@
         "circle-stroke-color":"#ffffff"
       }
     });
+
+    if (!map.getSource("poi-labels")) {
+      map.addSource("poi-labels", { type:"geojson", data:{type:"FeatureCollection",features:labelFeatures} });
+
+      map.addLayer({
+        id:"poi-circles",
+        type:"circle",
+        source:"poi-labels",
+        paint:{
+          "circle-radius":["match",["get","role"],"major",7,5],
+          "circle-color":["match",["get","role"],"major","#f59e0b","#60a5fa"],
+          "circle-stroke-width":2,
+          "circle-stroke-color":"#ffffff",
+          "circle-opacity":0.9
+        }
+      });
+
+      map.addLayer({
+        id:"poi-label-text",
+        type:"symbol",
+        source:"poi-labels",
+        layout:{
+          "text-field":["get","name"],
+          "text-size":["match",["get","role"],"major",14,11],
+          "text-offset":[0,1.2],
+          "text-anchor":"top",
+          "text-max-width":14,
+          "text-allow-overlap":false
+        },
+        paint:{
+          "text-color":"#ffffff",
+          "text-halo-color":"rgba(4,10,18,0.96)",
+          "text-halo-width":1.5
+        }
+      });
+    }
 
     fitOverview(false);
     await waitMapIdle(4000);
@@ -666,6 +881,34 @@
     ctx.font=`600 ${Math.max(18,fs*.52)}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
     ctx.fillText(`${Math.round(totalKm)} km · Tour Animator`,pad+26,y+barH*.72);
     ctx.restore();
+
+    if (activeStop) {
+      const boxW = Math.min(dimensions.w * 0.44, 760);
+      const boxH = dimensions.h > dimensions.w ? 170 : 130;
+      const bx = dimensions.w - boxW - pad;
+      const by = pad;
+      ctx.save();
+      ctx.fillStyle = "rgba(4,10,18,.76)";
+      roundRect(ctx,bx,by,boxW,boxH,18*(dimensions.w/1920));
+      ctx.fill();
+
+      ctx.fillStyle = activeStop.role === "major" ? "#fbbf24" : "#93c5fd";
+      ctx.font = `800 ${Math.max(18,fs*.48)}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      ctx.textBaseline = "top";
+      ctx.fillText(stopKindLabel(activeStop), bx + 22, by + 18);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `800 ${Math.max(24,fs*.78)}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      wrapText(ctx, displayStopName(activeStop.name), bx + 22, by + 48, boxW - 44, Math.max(28,fs*.85));
+
+      const ap = map.project(activeStop.coord);
+      ctx.strokeStyle = activeStop.role === "major" ? "rgba(251,191,36,.95)" : "rgba(147,197,253,.95)";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(ap.x, ap.y, activeStop.role === "major" ? 20 : 16, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   function roundRect(ctx,x,y,w,h,r){
@@ -673,6 +916,24 @@
     ctx.beginPath();
     ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
     ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+  }
+
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = String(text || "").split(/\s+/);
+    let line = "";
+    let row = 0;
+    for (let n = 0; n < words.length; n++) {
+      const test = line ? line + " " + words[n] : words[n];
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line, x, y + row * lineHeight);
+        line = words[n];
+        row += 1;
+        if (row >= 2) break;
+      } else {
+        line = test;
+      }
+    }
+    if (line) ctx.fillText(line, x, y + row * lineHeight);
   }
 
   async function preloadRoute() {
@@ -684,6 +945,7 @@
   }
 
   function stopAnimation() {
+    activeStop = null;
     playing=false;
     if(frameId) cancelAnimationFrame(frameId);
     frameId=null;
@@ -707,6 +969,7 @@
     await waitMapIdle(800);
 
     const durationSec=Number(els.duration.value)||25;
+    const playbackPlan = buildPlaybackPlan(durationSec);
 
     if ((els.viewMode?.value || "follow") === "overview") {
       fitOverview(false);
@@ -758,8 +1021,10 @@
           try{recorder?.stop()}catch(_){}
           return resolve();
         }
-        const raw=Math.min(1,(now-start)/(durationSec*1000));
-        const info=timeline(raw);
+        const elapsedSec = Math.min(playbackPlan.totalSec, (now-start)/1000);
+        const raw = Math.min(1, elapsedSec / playbackPlan.totalSec);
+        const info = playbackState(playbackPlan, elapsedSec);
+        activeStop = info.activeStop;
         const p=pointAt(info.routeP);
 
         updateRouteProgress(info.routeP);
@@ -790,6 +1055,7 @@
               els.renderStatus.textContent=`Video fertig · ${ext.toUpperCase()}`;
               els.progress.value=1;
               els.preview.disabled=false;els.record.disabled=false;
+              activeStop = null;
               updateRouteProgress(1);
               setTimeout(()=>fitOverview(true), 650);
               resolve();
@@ -799,6 +1065,7 @@
             els.renderStatus.textContent="Vorschau beendet";
             els.progress.value=1;
             els.preview.disabled=false;els.record.disabled=false;
+            activeStop = null;
             updateRouteProgress(1);
             setTimeout(()=>fitOverview(true), 650);
             resolve();
