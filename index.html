@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.7</title>
+  <title>Tour Animator V0.1.8</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -153,10 +153,11 @@
         </div>
 
         <button id="previewBtn" class="btn primary" disabled>▶ Vorschau</button>
+        <button id="cancelBtn" class="btn secondary hidden">■ Vorschau abbrechen</button>
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele und Zwischenziele bleiben dauerhaft sichtbar. Die Einblendungen sind größer, Zwischenziele und Tagesziele haben getrennte, längere Stopps, und erreichte Punkte bleiben auf der Karte stehen.
+          Die Videodauer bestimmt jetzt ausschließlich die Fahrzeit. Stopps werden zusätzlich eingefügt und verändern das Fahrtempo nicht mehr. Vorschauen können jederzeit abgebrochen werden.
         </div>
       </aside>
 
@@ -199,6 +200,7 @@
     majorStopDuration: document.getElementById("majorStopDuration"),
     viaStopDuration: document.getElementById("viaStopDuration"),
     preview: document.getElementById("previewBtn"),
+    cancel: document.getElementById("cancelBtn"),
     record: document.getElementById("recordBtn"),
     shell: document.getElementById("stageShell"),
     stage: document.getElementById("stage"),
@@ -589,10 +591,9 @@
         : minorPauseBase
     }));
 
-    const pauseSum = pauses.reduce((sum, s) => sum + s.pauseSec, 0);
-    const desiredTravelSec = durationSec - pauseSum;
-    const minTravelSec = Math.max(10, durationSec * 0.35);
-    const travelSec = Math.max(minTravelSec, desiredTravelSec);
+    // Die gewählte Dauer gilt nur für die reine Fahrt.
+    // Stopps kommen zusätzlich hinzu und verändern das Fahrtempo nicht.
+    const travelSec = Math.max(1.5, durationSec);
 
     const segments = [];
     let cursor = 0;
@@ -601,24 +602,46 @@
     for (const stop of pauses) {
       const delta = Math.max(0, stop.progress - prevProgress);
       const segTravel = travelSec * delta;
+
       if (segTravel > 0.001) {
-        segments.push({ kind: "travel", t0: cursor, t1: cursor + segTravel, p0: prevProgress, p1: stop.progress });
+        segments.push({
+          kind: "travel",
+          t0: cursor,
+          t1: cursor + segTravel,
+          p0: prevProgress,
+          p1: stop.progress
+        });
         cursor += segTravel;
       }
+
       if (stop.pauseSec > 0.01) {
-        segments.push({ kind: "hold", t0: cursor, t1: cursor + stop.pauseSec, p0: stop.progress, p1: stop.progress, stop });
+        segments.push({
+          kind: "hold",
+          t0: cursor,
+          t1: cursor + stop.pauseSec,
+          p0: stop.progress,
+          p1: stop.progress,
+          stop
+        });
         cursor += stop.pauseSec;
       }
+
       prevProgress = stop.progress;
     }
 
     if (prevProgress < 1) {
       const segTravel = travelSec * (1 - prevProgress);
-      segments.push({ kind: "travel", t0: cursor, t1: cursor + segTravel, p0: prevProgress, p1: 1 });
+      segments.push({
+        kind: "travel",
+        t0: cursor,
+        t1: cursor + segTravel,
+        p0: prevProgress,
+        p1: 1
+      });
       cursor += segTravel;
     }
 
-    return {segments, durationSec, totalSec: cursor || durationSec};
+    return {segments, durationSec, travelSec, totalSec: cursor || durationSec};
   }
 
   function playbackState(plan, elapsedSec) {
@@ -627,8 +650,7 @@
       if (t <= seg.t1 + 1e-9) {
         if (seg.kind === "hold") return {routeP: seg.p0, activeStop: seg.stop, phase: "hold"};
         const local = seg.t1 > seg.t0 ? (t - seg.t0) / (seg.t1 - seg.t0) : 1;
-        const easedLocal = eased(local);
-        return { routeP: seg.p0 + (seg.p1 - seg.p0) * easedLocal, activeStop: null, phase: "travel" };
+        return { routeP: seg.p0 + (seg.p1 - seg.p0) * local, activeStop: null, phase: "travel" };
       }
     }
     return {routeP: 1, activeStop: null, phase: "done"};
@@ -1026,6 +1048,9 @@
     playing=false;
     if(frameId) cancelAnimationFrame(frameId);
     frameId=null;
+    if (els.cancel) els.cancel.classList.add("hidden");
+    if (els.preview) els.preview.disabled = routeCoords.length < 2;
+    if (els.record) els.record.disabled = routeCoords.length < 2;
   }
 
   async function play({record=false}={}) {
@@ -1037,6 +1062,7 @@
     playing=true;
     els.preview.disabled=true;
     els.record.disabled=true;
+    els.cancel.classList.remove("hidden");
     els.progress.value=0;
 
     if(record) await preloadRoute();
@@ -1133,7 +1159,7 @@
               setTimeout(()=>URL.revokeObjectURL(a.href),5000);
               els.renderStatus.textContent=`Video fertig · ${ext.toUpperCase()}`;
               els.progress.value=1;
-              els.preview.disabled=false;els.record.disabled=false;
+              els.preview.disabled=false;els.record.disabled=false;els.cancel.classList.add("hidden");els.cancel.classList.add("hidden");
               activeStop = null;
               updateRouteProgress(1);
               updateReachedStops(1);
@@ -1144,7 +1170,7 @@
           } else {
             els.renderStatus.textContent="Vorschau beendet";
             els.progress.value=1;
-            els.preview.disabled=false;els.record.disabled=false;
+            els.preview.disabled=false;els.record.disabled=false;els.cancel.classList.add("hidden");
             activeStop = null;
             updateRouteProgress(1);
             updateReachedStops(1);
@@ -1160,9 +1186,24 @@
   }
 
   els.preview.addEventListener("click",()=>play({record:false}).catch(err=>alert(err.message||err)));
+  els.cancel.addEventListener("click",()=>{
+    stopAnimation();
+    els.renderStatus.textContent="Vorschau abgebrochen";
+    els.progress.value=0;
+    updateRouteProgress(0);
+    updateReachedStops(0);
+    activeStop=null;
+    if ((els.viewMode?.value || "follow") === "overview") {
+      fitOverview(true);
+    } else {
+      const p0=pointAt(0);
+      map?.easeTo({center:p0.coord,zoom:computeFollowZoom(),pitch:0,bearing:0,duration:350});
+    }
+    drawOverlay(0, routeCoords[0], 0, false);
+  });
   els.record.addEventListener("click",()=>play({record:true}).catch(err=>{
     els.renderStatus.textContent="Fehler";
-    els.preview.disabled=false;els.record.disabled=false;
+    els.preview.disabled=false;els.record.disabled=false;els.cancel.classList.add("hidden");
     alert(err.message||err);
   }));
 
