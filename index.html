@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.5</title>
+  <title>Tour Animator V0.1.6</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -101,6 +101,7 @@
               <option value="15">15 Sekunden</option>
               <option value="25" selected>25 Sekunden</option>
               <option value="40">40 Sekunden</option>
+              <option value="60">1 Minute</option>
             </select>
           </div>
         </div>
@@ -135,9 +136,9 @@
         <div class="field">
           <label for="majorStopDuration">Tagesziel-Einblendung</label>
           <select id="majorStopDuration">
-            <option value="1">1 Sekunde</option>
-            <option value="2" selected>2 Sekunden</option>
-            <option value="3">3 Sekunden</option>
+            <option value="3" selected>3 Sekunden</option>
+            <option value="4">4 Sekunden</option>
+            <option value="5">5 Sekunden</option>
           </select>
         </div>
 
@@ -145,7 +146,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele bleiben dauerhaft mit Tagesnummer und Label sichtbar; erreichte Shaping Points bleiben als kleine Punkte stehen.
+          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele bleiben dauerhaft mit Tagesnummer und Label sichtbar; erreichte Shaping Points bleiben als kleine Punkte stehen. Zwischenziele halten mindestens 2 Sekunden, Tagesziele mindestens 3 Sekunden. Der Marker ist jetzt ein Richtungspfeil.
         </div>
       </aside>
 
@@ -565,20 +566,21 @@
 
   function buildPlaybackPlan(durationSec) {
     const usableStops = stopEvents.filter(s => s.progress > 0.01 && s.progress < 0.995);
-    const majorPauseBase = Number(els.majorStopDuration?.value || 2);
-    const minorPauseBase = 0.22;
 
-    const basePause = usableStops.reduce((sum, s) => sum + (s.role === "major" ? majorPauseBase : minorPauseBase), 0);
-    const maxPause = durationSec * 0.55;
-    const pauseScale = basePause > 0 ? Math.min(1, maxPause / basePause) : 0;
+    const dayPauseBase = Math.max(3, Number(els.majorStopDuration?.value || 3));
+    const viaPauseBase = 2.0;
+    const minorPauseBase = 0.22;
 
     const pauses = usableStops.map(s => ({
       ...s,
-      pauseSec: (s.role === "major" ? majorPauseBase : minorPauseBase) * pauseScale
+      pauseSec: s.role === "major"
+        ? (s.day ? dayPauseBase : viaPauseBase)
+        : minorPauseBase
     }));
 
     const pauseSum = pauses.reduce((sum, s) => sum + s.pauseSec, 0);
-    const travelSec = Math.max(1.5, durationSec - pauseSum);
+    const desiredTravelSec = durationSec - pauseSum;
+    const travelSec = Math.max(1.5, desiredTravelSec);
 
     const segments = [];
     let cursor = 0;
@@ -863,36 +865,47 @@
     });
   }
 
-  function drawBike(ctx,x,y,heading,scale=1) {
+  function drawArrowMarker(ctx,x,y,heading,scale=1) {
     ctx.save();
     ctx.translate(x,y);
     ctx.rotate(heading*Math.PI/180);
     ctx.scale(scale,scale);
 
-    ctx.shadowColor="rgba(0,0,0,.5)";
-    ctx.shadowBlur=18;
-    ctx.shadowOffsetY=8;
+    ctx.shadowColor="rgba(0,0,0,.45)";
+    ctx.shadowBlur=14;
+    ctx.shadowOffsetY=6;
 
     ctx.fillStyle="rgba(5,12,22,.94)";
-    ctx.beginPath(); ctx.arc(0,0,36,0,Math.PI*2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0,0,26,0,Math.PI*2);
+    ctx.fill();
 
     ctx.shadowColor="transparent";
-    ctx.strokeStyle="#ffffff";
-    ctx.lineWidth=6;
-    ctx.lineCap="round";
-    // Wheels
-    ctx.beginPath(); ctx.arc(-13,12,9,0,Math.PI*2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(13,12,9,0,Math.PI*2); ctx.stroke();
-    // Frame
-    ctx.beginPath();
-    ctx.moveTo(-13,12);ctx.lineTo(-4,-2);ctx.lineTo(12,12);
-    ctx.moveTo(-4,-2);ctx.lineTo(3,12);
-    ctx.moveTo(-4,-2);ctx.lineTo(9,-7);
-    ctx.moveTo(9,-7);ctx.lineTo(13,12);
-    ctx.stroke();
-    // Direction arrow / rider
+
     ctx.fillStyle="#a78bfa";
-    ctx.beginPath();ctx.moveTo(0,-31);ctx.lineTo(-9,-14);ctx.lineTo(9,-14);ctx.closePath();ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0,-24);
+    ctx.lineTo(15,6);
+    ctx.lineTo(5,6);
+    ctx.lineTo(5,20);
+    ctx.lineTo(-5,20);
+    ctx.lineTo(-5,6);
+    ctx.lineTo(-15,6);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle="#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(0,-15);
+    ctx.lineTo(8,3);
+    ctx.lineTo(2,3);
+    ctx.lineTo(2,14);
+    ctx.lineTo(-2,14);
+    ctx.lineTo(-2,3);
+    ctx.lineTo(-8,3);
+    ctx.closePath();
+    ctx.fill();
+
     ctx.restore();
   }
 
@@ -903,7 +916,7 @@
 
     const projected=map.project(coord);
     const scale=recording ? 1 : 1;
-    drawBike(ctx,projected.x,projected.y,heading,dimensions.w/1920);
+    drawArrowMarker(ctx,projected.x,projected.y,heading,dimensions.w/1920);
 
     // Bottom title panel, deliberately minimal.
     const pad=dimensions.w*0.035;
@@ -1167,7 +1180,7 @@
   });
   els.majorStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;
-    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration.value}s`;
+    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration.value}s · Zwischenziel: 2s`;
   });
   window.addEventListener("resize",()=>layoutStage());
 

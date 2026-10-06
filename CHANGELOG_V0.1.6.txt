@@ -1,0 +1,6 @@
+Tour Animator V0.1.6
+
+- Zwischenziele mindestens 2 Sekunden
+- Tagesziele mindestens 3 Sekunden, wählbar 3 / 4 / 5 Sekunden
+- Motorradmarker ersetzt durch Richtungspfeil
+- zusätzliche Videodauer 1 Minute
