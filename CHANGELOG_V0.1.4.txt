@@ -1,0 +1,6 @@
+Tour Animator V0.1.4
+
+- größere Labels bei Tageszielen
+- Tagesnummern N1, N2, N3 … auf Karte und Einblendung
+- neue Wahl für Tagesziel-Einblendung: 1 / 2 / 3 Sekunden
+- Shaping-Point-Stopps bleiben kurz
