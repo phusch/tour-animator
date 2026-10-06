@@ -1,4 +1,4 @@
-# Tour Animator V0.2.1
+# Tour Animator V0.2.2
 
 Kleine GitHub-Pages-App für animierte Routenvideos aus dem **Tour Navigator**.
 
@@ -69,7 +69,7 @@ Wenn das Routing nicht erreichbar ist, verbindet die App die übergebenen Wegpun
 Siehe Datei `TOUR_NAVIGATOR_PATCH.md`.
 
 
-## Änderung V0.2.1
+## Änderung V0.2.2
 
 - Kameradrehung und hektisches Nachführen deaktiviert
 - statische nordorientierte Gesamtansicht während der gesamten Animation
@@ -80,7 +80,7 @@ Siehe Datei `TOUR_NAVIGATOR_PATCH.md`.
 Stops / Tagesetappen / Shaping Points sind bewusst noch nicht Bestandteil dieser Reparaturversion.
 
 
-## V0.2.1
+## V0.2.2
 
 - neue Ansichtsmodi: Gesamtübersicht, Sanft folgen, Nah dran
 - Zoom: Weit, Mittel, Nah
@@ -88,8 +88,16 @@ Stops / Tagesetappen / Shaping Points sind bewusst noch nicht Bestandteil dieser
 - Kamera bleibt immer nordorientiert und wird weich interpoliert
 
 
-## V0.2.1
+## V0.2.2
 
 - Tagesziele erscheinen beim Erreichen und bleiben dauerhaft mit N-Nummer und Label sichtbar
 - Shaping Points erscheinen beim Erreichen und bleiben dauerhaft als kleine Punkte sichtbar
 - Shaping-Namen bleiben nur als kurze Stop-Einblendung sichtbar
+
+
+## V0.2.2
+
+- Reparatur: komplette Ziel-/Stoplogik wieder enthalten (`buildStopEvents` und zugehörige Funktionen)
+- Routenglättung aus V0.2.1 sauber neu integriert
+- Pfeilrichtung geglättet
+- Tagesziel-/Zwischenziel-Zeiten, dauerhafte Punkte und Vorschau-Abbruch bleiben erhalten
