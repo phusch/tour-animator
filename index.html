@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator</title>
+  <title>Tour Animator V0.1.1</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -117,7 +117,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Kamera, Zoom, Linienführung und Motorradmarker laufen automatisch. Bei Tour-Navigator-Wegpunkten wird die Straßenlinie automatisch aus den Koordinaten rekonstruiert.
+          Die Karte bleibt für eine ruhige Animation fest ausgerichtet. Die Route wächst einmal vom Start bis zum Ziel und das Motorrad fährt synchron auf der Linie. Bei Tour-Navigator-Wegpunkten wird die Straßenlinie automatisch rekonstruiert.
         </div>
       </aside>
 
@@ -421,37 +421,19 @@
       map.once("error",e=>{ /* map can still work after tile/style errors */ });
     });
 
-    if (!map.getSource("route")) {
-      map.addSource("route", {
+    if (!map.getSource("route-progress")) {
+      map.addSource("route-progress", {
         type:"geojson",
-        lineMetrics:true,
-        data:{type:"Feature",geometry:{type:"LineString",coordinates:routeCoords}}
-      });
-      map.addLayer({
-        id:"route-ghost",
-        type:"line",
-        source:"route",
-        paint:{
-          "line-color":"rgba(255,255,255,0.38)",
-          "line-width":8,
-          "line-opacity":0.55
-        },
-        layout:{"line-cap":"round","line-join":"round"}
+        data:{type:"Feature",geometry:{type:"LineString",coordinates:[routeCoords[0],routeCoords[0]]}}
       });
       map.addLayer({
         id:"route-progress",
         type:"line",
-        source:"route",
+        source:"route-progress",
         paint:{
+          "line-color":"#7c3aed",
           "line-width":12,
-          "line-opacity":1,
-          "line-gradient":[
-            "interpolate",["linear"],["line-progress"],
-            0,"#7c3aed",
-            0.0001,"#7c3aed",
-            0.0002,"rgba(124,58,237,0)",
-            1,"rgba(124,58,237,0)"
-          ]
+          "line-opacity":1
         },
         layout:{"line-cap":"round","line-join":"round"}
       });
@@ -514,75 +496,50 @@
   }
 
   function timeline(raw) {
-    const intro=.12, outro=.12;
-    if(raw < intro) {
-      const t=eased(raw/intro);
-      return {routeP:0, phase:"intro", t};
-    }
-    if(raw > 1-outro) {
-      const t=eased((raw-(1-outro))/outro);
-      return {routeP:1, phase:"outro", t};
-    }
+    const intro=.08, outro=.08;
+    if(raw <= intro) return {routeP:0, phase:"intro", t:raw/intro};
+    if(raw >= 1-outro) return {routeP:1, phase:"outro", t:(raw-(1-outro))/outro};
     const t=(raw-intro)/(1-intro-outro);
     return {routeP:eased(t), phase:"ride", t};
   }
 
-  function updateRouteGradient(progress) {
-    const p=Math.max(0.0001,Math.min(.9999,progress));
-    if(!map?.getLayer("route-progress")) return;
-    map.setPaintProperty("route-progress","line-gradient",[
-      "interpolate",["linear"],["line-progress"],
-      0,"#7c3aed",
-      p,"#7c3aed",
-      Math.min(1,p+.0001),"rgba(124,58,237,0)",
-      1,"rgba(124,58,237,0)"
-    ]);
+  function progressCoordinates(progress) {
+    progress=Math.max(0,Math.min(1,progress));
+    if(!routeCoords.length) return [];
+    if(progress <= 0) return [routeCoords[0],routeCoords[0]];
+    if(progress >= 1) return routeCoords.slice();
+
+    const target=progress*totalKm;
+    let lo=0, hi=cumulative.length-1;
+    while(lo<hi){
+      const mid=Math.floor((lo+hi)/2);
+      if(cumulative[mid] < target) lo=mid+1; else hi=mid;
+    }
+    const idx=Math.max(1,lo);
+    const coords=routeCoords.slice(0,idx);
+    const a=routeCoords[idx-1], b=routeCoords[idx];
+    const seg=Math.max(1e-9,cumulative[idx]-cumulative[idx-1]);
+    const t=(target-cumulative[idx-1])/seg;
+    coords.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);
+    return coords;
+  }
+
+  function updateRouteProgress(progress) {
+    const src=map?.getSource("route-progress");
+    if(!src) return;
+    src.setData({
+      type:"Feature",
+      geometry:{type:"LineString",coordinates:progressCoordinates(progress)}
+    });
   }
 
   function computeFollowZoom() {
-    if(totalKm > 800) return 8.7;
-    if(totalKm > 350) return 9.25;
-    if(totalKm > 120) return 10.0;
-    return 10.8;
+    return map?.getZoom?.() || 6;
   }
 
   function updateCamera(info, point) {
-    if(!map) return;
-    const followZoom=computeFollowZoom();
-
-    if(info.phase==="intro") {
-      const start=routeCoords[0];
-      const z=map.getZoom();
-      map.jumpTo({
-        center:start,
-        zoom: Math.max(5.8, followZoom-2.6 + info.t*2.6),
-        pitch: 42*info.t,
-        bearing: point.bearing*info.t
-      });
-    } else if(info.phase==="ride") {
-      map.jumpTo({
-        center:point.coord,
-        zoom:followZoom,
-        pitch:42,
-        bearing:point.bearing
-      });
-    } else {
-      if(info.t < .25) {
-        map.jumpTo({center:point.coord,zoom:followZoom-1.1*info.t,pitch:42*(1-info.t),bearing:point.bearing*(1-info.t)});
-      } else {
-        // For the final second(s), progressively relax to a route overview.
-        const b=routeBounds();
-        const center=b.getCenter();
-        const current=point.coord;
-        const k=(info.t-.25)/.75;
-        map.jumpTo({
-          center:[current[0]+(center.lng-current[0])*k,current[1]+(center.lat-current[1])*k],
-          zoom:Math.max(4.5,followZoom-(4.3*k)),
-          pitch:42*(1-k),
-          bearing:point.bearing*(1-k)
-        });
-      }
-    }
+    // V0.1.1: bewusst keine Kameradrehung / kein Nachführen.
+    // Die vollständige Route bleibt ruhig, nordorientiert und vollständig im Bild.
   }
 
   function drawBike(ctx,x,y,heading,scale=1) {
@@ -659,14 +616,9 @@
   async function preloadRoute() {
     if(!map || !routeCoords.length) return;
     els.renderStatus.textContent="Kartenmaterial vorbereiten";
-    const steps=14;
-    for(let i=0;i<steps;i++){
-      const p=pointAt(i/(steps-1));
-      map.jumpTo({center:p.coord,zoom:computeFollowZoom(),pitch:42,bearing:p.bearing});
-      els.progress.value=i/(steps-1)*.18;
-      await new Promise(r=>setTimeout(r,110));
-    }
-    await waitMapIdle(2200);
+    fitOverview(false);
+    await waitMapIdle(2500);
+    els.progress.value=.12;
   }
 
   function stopAnimation() {
@@ -684,6 +636,10 @@
     els.progress.value=0;
 
     if(record) await preloadRoute();
+
+    fitOverview(false);
+    updateRouteProgress(0);
+    await waitMapIdle(800);
 
     const durationSec=Number(els.duration.value)||25;
     const start=performance.now();
@@ -726,7 +682,7 @@
         const info=timeline(raw);
         const p=pointAt(info.routeP);
 
-        updateRouteGradient(info.routeP);
+        updateRouteProgress(info.routeP);
         updateCamera(info,p);
         drawOverlay(raw,p.coord,p.bearing,record);
         els.progress.value=record ? .18 + raw*.82 : raw;
@@ -754,6 +710,7 @@
               els.renderStatus.textContent=`Video fertig · ${ext.toUpperCase()}`;
               els.progress.value=1;
               els.preview.disabled=false;els.record.disabled=false;
+              updateRouteProgress(1);
               fitOverview(true);
               resolve();
             };
@@ -762,6 +719,7 @@
             els.renderStatus.textContent="Vorschau beendet";
             els.progress.value=1;
             els.preview.disabled=false;els.record.disabled=false;
+            updateRouteProgress(1);
             fitOverview(true);
             resolve();
           }
