@@ -1,0 +1,8 @@
+Tour Animator V0.1.7
+
+- größere Ziel-Overlays
+- eigener Regler für Zwischenziel-Einblendung
+- Tagesziele 3/4/5/6 Sekunden, Standard 4s
+- Zwischenziele 2/3/4 Sekunden, Standard 3s
+- erreichte Ziele bleiben deutlicher als Punkte/Labels sichtbar
+- mehr Mindest-Reisezeit zwischen den Stopps

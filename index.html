@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.6</title>
+  <title>Tour Animator V0.1.7</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -136,9 +136,19 @@
         <div class="field">
           <label for="majorStopDuration">Tagesziel-Einblendung</label>
           <select id="majorStopDuration">
+            <option value="3">3 Sekunden</option>
+            <option value="4" selected>4 Sekunden</option>
+            <option value="5">5 Sekunden</option>
+            <option value="6">6 Sekunden</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="viaStopDuration">Zwischenziel-Einblendung</label>
+          <select id="viaStopDuration">
+            <option value="2">2 Sekunden</option>
             <option value="3" selected>3 Sekunden</option>
             <option value="4">4 Sekunden</option>
-            <option value="5">5 Sekunden</option>
           </select>
         </div>
 
@@ -146,7 +156,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele bleiben dauerhaft mit Tagesnummer und Label sichtbar; erreichte Shaping Points bleiben als kleine Punkte stehen. Zwischenziele halten mindestens 2 Sekunden, Tagesziele mindestens 3 Sekunden. Der Marker ist jetzt ein Richtungspfeil.
+          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele und Zwischenziele bleiben dauerhaft sichtbar. Die Einblendungen sind größer, Zwischenziele und Tagesziele haben getrennte, längere Stopps, und erreichte Punkte bleiben auf der Karte stehen.
         </div>
       </aside>
 
@@ -187,6 +197,7 @@
     viewMode: document.getElementById("viewMode"),
     zoomLevel: document.getElementById("zoomLevel"),
     majorStopDuration: document.getElementById("majorStopDuration"),
+    viaStopDuration: document.getElementById("viaStopDuration"),
     preview: document.getElementById("previewBtn"),
     record: document.getElementById("recordBtn"),
     shell: document.getElementById("stageShell"),
@@ -567,9 +578,9 @@
   function buildPlaybackPlan(durationSec) {
     const usableStops = stopEvents.filter(s => s.progress > 0.01 && s.progress < 0.995);
 
-    const dayPauseBase = Math.max(3, Number(els.majorStopDuration?.value || 3));
-    const viaPauseBase = 2.0;
-    const minorPauseBase = 0.22;
+    const dayPauseBase = Math.max(3, Number(els.majorStopDuration?.value || 4));
+    const viaPauseBase = Math.max(2, Number(els.viaStopDuration?.value || 3));
+    const minorPauseBase = 0.35;
 
     const pauses = usableStops.map(s => ({
       ...s,
@@ -580,7 +591,8 @@
 
     const pauseSum = pauses.reduce((sum, s) => sum + s.pauseSec, 0);
     const desiredTravelSec = durationSec - pauseSum;
-    const travelSec = Math.max(1.5, desiredTravelSec);
+    const minTravelSec = Math.max(10, durationSec * 0.35);
+    const travelSec = Math.max(minTravelSec, desiredTravelSec);
 
     const segments = [];
     let cursor = 0;
@@ -712,7 +724,7 @@
         type:"circle",
         source:"poi-labels",
         paint:{
-          "circle-radius":["match",["get","role"],"major",9,4],
+          "circle-radius":["match",["get","role"],"major",11,5],
           "circle-color":["match",["get","role"],"major","#f59e0b","#60a5fa"],
           "circle-stroke-width":2,
           "circle-stroke-color":"#ffffff",
@@ -727,7 +739,7 @@
         filter:["==",["get","showLabel"],true],
         layout:{
           "text-field":["get","name"],
-          "text-size":["match",["get","role"],"major",16,11],
+          "text-size":["match",["get","role"],"major",18,12],
           "text-offset":[0,1.2],
           "text-anchor":"top",
           "text-max-width":14,
@@ -941,35 +953,36 @@
 
     if (activeStop) {
       const isMajor = activeStop.role === "major";
-      const boxW = Math.min(dimensions.w * (isMajor ? 0.50 : 0.40), isMajor ? 840 : 700);
+      const isDay = isMajor && !!activeStop.day;
+      const boxW = Math.min(dimensions.w * (isDay ? 0.58 : 0.54), isDay ? 960 : 900);
       const boxH = dimensions.h > dimensions.w
-        ? (isMajor ? 210 : 170)
-        : (isMajor ? 165 : 130);
+        ? (isDay ? 250 : 220)
+        : (isDay ? 200 : 180);
       const bx = dimensions.w - boxW - pad;
       const by = pad;
       ctx.save();
-      ctx.fillStyle = "rgba(4,10,18,.80)";
-      roundRect(ctx,bx,by,boxW,boxH,18*(dimensions.w/1920));
+      ctx.fillStyle = "rgba(4,10,18,.83)";
+      roundRect(ctx,bx,by,boxW,boxH,20*(dimensions.w/1920));
       ctx.fill();
 
-      ctx.fillStyle = isMajor ? "#fbbf24" : "#93c5fd";
-      ctx.font = `800 ${Math.max(isMajor ? 24 : 18, fs*(isMajor ? .56 : .48))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      ctx.fillStyle = isDay ? "#fbbf24" : (isMajor ? "#c4b5fd" : "#93c5fd");
+      ctx.font = `800 ${Math.max(isDay ? 28 : 24, fs*(isDay ? .62 : .56))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
       ctx.textBaseline = "top";
-      ctx.fillText(stopKindLabel(activeStop), bx + 22, by + 18);
+      ctx.fillText(stopKindLabel(activeStop), bx + 24, by + 18);
 
-      const stopTitle = isMajor && activeStop.day
+      const stopTitle = isDay && activeStop.day
         ? `N${activeStop.day} · ${activeStop.name}`
         : displayStopName(activeStop.name);
 
       ctx.fillStyle = "#ffffff";
-      ctx.font = `800 ${Math.max(isMajor ? 34 : 24, fs*(isMajor ? .92 : .78))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
-      wrapText(ctx, stopTitle, bx + 22, by + 56, boxW - 44, Math.max(isMajor ? 36 : 28, fs*(isMajor ? .95 : .85)));
+      ctx.font = `800 ${Math.max(isDay ? 40 : 34, fs*(isDay ? 1.02 : .92))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      wrapText(ctx, stopTitle, bx + 24, by + 62, boxW - 48, Math.max(isDay ? 42 : 36, fs*(isDay ? 1.0 : .95)));
 
       const ap = map.project(activeStop.coord);
-      ctx.strokeStyle = isMajor ? "rgba(251,191,36,.98)" : "rgba(147,197,253,.95)";
-      ctx.lineWidth = isMajor ? 6 : 5;
+      ctx.strokeStyle = isDay ? "rgba(251,191,36,.98)" : (isMajor ? "rgba(196,181,253,.98)" : "rgba(147,197,253,.95)");
+      ctx.lineWidth = isDay ? 7 : 6;
       ctx.beginPath();
-      ctx.arc(ap.x, ap.y, isMajor ? 24 : 16, 0, Math.PI * 2);
+      ctx.arc(ap.x, ap.y, isDay ? 28 : 22, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
@@ -1180,7 +1193,11 @@
   });
   els.majorStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;
-    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration.value}s · Zwischenziel: 2s`;
+    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration.value}s · Zwischenziel: ${els.viaStopDuration?.value || 3}s`;
+  });
+  els.viaStopDuration?.addEventListener("change",()=>{
+    if(!map || !routeCoords.length) return;
+    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration?.value || 4}s · Zwischenziel: ${els.viaStopDuration.value}s`;
   });
   window.addEventListener("resize",()=>layoutStage());
 
