@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.8</title>
+  <title>Tour Animator V0.1.9</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -144,11 +144,12 @@
         </div>
 
         <div class="field">
-          <label for="viaStopDuration">Zwischenziel-Einblendung</label>
+          <label for="viaStopDuration">Zwischenziel / Shaping Point</label>
           <select id="viaStopDuration">
-            <option value="2">2 Sekunden</option>
-            <option value="3" selected>3 Sekunden</option>
-            <option value="4">4 Sekunden</option>
+            <option value="3">3 Sekunden</option>
+            <option value="4" selected>4 Sekunden</option>
+            <option value="5">5 Sekunden</option>
+            <option value="6">6 Sekunden</option>
           </select>
         </div>
 
@@ -157,7 +158,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Videodauer bestimmt jetzt ausschließlich die Fahrzeit. Stopps werden zusätzlich eingefügt und verändern das Fahrtempo nicht mehr. Vorschauen können jederzeit abgebrochen werden.
+          Die Videodauer bestimmt nur die Fahrzeit. Der Regler „Zwischenziel / Shaping Point“ steuert jetzt tatsächlich alle Zwischenstopps. Ziel-Einblendungen sind deutlich größer und bleiben für die gewählte Zeit stehen.
         </div>
       </aside>
 
@@ -581,18 +582,19 @@
     const usableStops = stopEvents.filter(s => s.progress > 0.01 && s.progress < 0.995);
 
     const dayPauseBase = Math.max(3, Number(els.majorStopDuration?.value || 4));
-    const viaPauseBase = Math.max(2, Number(els.viaStopDuration?.value || 3));
-    const minorPauseBase = 0.35;
+    const intermediatePauseBase = Math.max(3, Number(els.viaStopDuration?.value || 4));
 
     const pauses = usableStops.map(s => ({
       ...s,
-      pauseSec: s.role === "major"
-        ? (s.day ? dayPauseBase : viaPauseBase)
-        : minorPauseBase
+      // Tagesziele haben eigene Dauer.
+      // ALLE übrigen Ziele, inklusive Shaping Points, reagieren auf den Zwischenziel-Regler.
+      pauseSec: (s.role === "major" && s.day)
+        ? dayPauseBase
+        : intermediatePauseBase
     }));
 
-    // Die gewählte Dauer gilt nur für die reine Fahrt.
-    // Stopps kommen zusätzlich hinzu und verändern das Fahrtempo nicht.
+    // Die gewählte Videodauer gilt nur für die reine Fahrt.
+    // Stopps werden zusätzlich angehängt.
     const travelSec = Math.max(1.5, durationSec);
 
     const segments = [];
@@ -976,36 +978,42 @@
     if (activeStop) {
       const isMajor = activeStop.role === "major";
       const isDay = isMajor && !!activeStop.day;
-      const boxW = Math.min(dimensions.w * (isDay ? 0.58 : 0.54), isDay ? 960 : 900);
+
+      // V0.1.9: deutlich größere Zieleinblendung.
+      const boxW = Math.min(dimensions.w * 0.82, 1500);
       const boxH = dimensions.h > dimensions.w
-        ? (isDay ? 250 : 220)
-        : (isDay ? 200 : 180);
-      const bx = dimensions.w - boxW - pad;
-      const by = pad;
+        ? (isDay ? 390 : 360)
+        : (isDay ? 310 : 285);
+
+      const bx = (dimensions.w - boxW) / 2;
+      const by = Math.max(28, dimensions.h * 0.045);
+
       ctx.save();
-      ctx.fillStyle = "rgba(4,10,18,.83)";
-      roundRect(ctx,bx,by,boxW,boxH,20*(dimensions.w/1920));
+      ctx.fillStyle = "rgba(4,10,18,.88)";
+      roundRect(ctx,bx,by,boxW,boxH,28*(dimensions.w/1920));
       ctx.fill();
 
       ctx.fillStyle = isDay ? "#fbbf24" : (isMajor ? "#c4b5fd" : "#93c5fd");
-      ctx.font = `800 ${Math.max(isDay ? 28 : 24, fs*(isDay ? .62 : .56))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      ctx.font = `900 ${Math.max(isDay ? 54 : 48, fs*(isDay ? 1.20 : 1.08))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
       ctx.textBaseline = "top";
-      ctx.fillText(stopKindLabel(activeStop), bx + 24, by + 18);
+      ctx.textAlign = "center";
+      ctx.fillText(stopKindLabel(activeStop), bx + boxW/2, by + 28);
 
       const stopTitle = isDay && activeStop.day
         ? `N${activeStop.day} · ${activeStop.name}`
         : displayStopName(activeStop.name);
 
       ctx.fillStyle = "#ffffff";
-      ctx.font = `800 ${Math.max(isDay ? 40 : 34, fs*(isDay ? 1.02 : .92))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
-      wrapText(ctx, stopTitle, bx + 24, by + 62, boxW - 48, Math.max(isDay ? 42 : 36, fs*(isDay ? 1.0 : .95)));
+      ctx.font = `900 ${Math.max(isDay ? 80 : 68, fs*(isDay ? 1.85 : 1.60))}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+      wrapTextCentered(ctx, stopTitle, bx + boxW/2, by + 105, boxW - 90, Math.max(isDay ? 88 : 76, fs*(isDay ? 1.90 : 1.65)));
 
       const ap = map.project(activeStop.coord);
-      ctx.strokeStyle = isDay ? "rgba(251,191,36,.98)" : (isMajor ? "rgba(196,181,253,.98)" : "rgba(147,197,253,.95)");
-      ctx.lineWidth = isDay ? 7 : 6;
+      ctx.strokeStyle = isDay ? "rgba(251,191,36,.99)" : (isMajor ? "rgba(196,181,253,.99)" : "rgba(147,197,253,.98)");
+      ctx.lineWidth = isDay ? 11 : 9;
       ctx.beginPath();
-      ctx.arc(ap.x, ap.y, isDay ? 28 : 22, 0, Math.PI * 2);
+      ctx.arc(ap.x, ap.y, isDay ? 40 : 34, 0, Math.PI * 2);
       ctx.stroke();
+
       ctx.restore();
     }
   }
@@ -1033,6 +1041,32 @@
       }
     }
     if (line) ctx.fillText(line, x, y + row * lineHeight);
+  }
+
+
+  function wrapTextCentered(ctx, text, centerX, y, maxWidth, lineHeight) {
+    const words = String(text || "").split(/\s+/);
+    let line = "";
+    let row = 0;
+    const lines = [];
+
+    for (let n = 0; n < words.length; n++) {
+      const test = line ? line + " " + words[n] : words[n];
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = words[n];
+        row += 1;
+        if (row >= 2) break;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+
+    ctx.textAlign = "center";
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], centerX, y + i * lineHeight);
+    }
   }
 
   async function preloadRoute() {
@@ -1234,11 +1268,11 @@
   });
   els.majorStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;
-    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration.value}s · Zwischenziel: ${els.viaStopDuration?.value || 3}s`;
+    els.renderStatus.textContent = `Tagesziel: ${els.majorStopDuration.value}s · Zwischenziel/Shaping: ${els.viaStopDuration?.value || 4}s`;
   });
   els.viaStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;
-    els.renderStatus.textContent = `Tagesziel-Stopp: ${els.majorStopDuration?.value || 4}s · Zwischenziel: ${els.viaStopDuration.value}s`;
+    els.renderStatus.textContent = `Tagesziel: ${els.majorStopDuration?.value || 4}s · Zwischenziel/Shaping: ${els.viaStopDuration.value}s`;
   });
   window.addEventListener("resize",()=>layoutStage());
 

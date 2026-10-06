@@ -1,0 +1,7 @@
+Tour Animator V0.1.8
+
+- Fahrtempo unabhängig von Stopps
+- Videodauer = reine Fahrzeit
+- Stopzeiten zusätzlich
+- Pfeil/Route synchronisiert
+- Vorschau abbrechen ergänzt

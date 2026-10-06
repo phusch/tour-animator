@@ -1,0 +1,6 @@
+Tour Animator V0.1.9
+
+- Fehler behoben: Shaping Points ignorierten bisher die Zwischenziel-Zeiteinstellung
+- alle Nicht-Tagesziele verwenden jetzt den Zwischenziel/Shaping-Regler
+- Standard Zwischenziel/Shaping: 4 Sekunden
+- Zieleinblendungen mindestens ungefähr doppelte Größe
