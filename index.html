@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.4</title>
+  <title>Tour Animator V0.1.5</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -145,7 +145,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Route wächst einmal vom Start bis zum Ziel. Tagesetappen erhalten größere Labels mit Tagesnummern N1, N2, N3 … und die Einblendungsdauer kann für Tagesziele auf 1, 2 oder 3 Sekunden gestellt werden.
+          Die Route wächst einmal vom Start bis zum Ziel. Erreichte Tagesziele bleiben dauerhaft mit Tagesnummer und Label sichtbar; erreichte Shaping Points bleiben als kleine Punkte stehen.
         </div>
       </aside>
 
@@ -521,18 +521,46 @@
     const keepMinor = new Set(sampledMinor.map(x => x.name + "|" + x.progress.toFixed(5)));
     stopEvents = deduped.filter(x => x.role === "major" || keepMinor.has(x.name + "|" + x.progress.toFixed(5)));
 
-    labelFeatures = stopEvents
-      .filter(x => x.role === "major" || !x.generic)
-      .map((s, i) => ({
-        type: "Feature",
-        properties: {
-          id: i + 1,
-          name: displayStopName(s.role === "major" && s.day ? `N${s.day} · ${s.name}` : s.name),
-          role: s.role,
-          kind: stopKindLabel(s)
-        },
-        geometry: {type: "Point", coordinates: s.coord}
-      }));
+    labelFeatures = [];
+  }
+
+  function reachedFeatureCollection(progress) {
+    const reached = stopEvents.filter(s => s.progress <= progress + 0.00001);
+    const features = [];
+
+    reached.forEach((s, i) => {
+      if (s.role === "major") {
+        features.push({
+          type:"Feature",
+          properties:{
+            id:`major-${i}`,
+            name: displayStopName(s.day ? `N${s.day} · ${s.name}` : s.name),
+            role:"major",
+            showLabel:true
+          },
+          geometry:{type:"Point",coordinates:s.coord}
+        });
+      } else {
+        features.push({
+          type:"Feature",
+          properties:{
+            id:`minor-${i}`,
+            name:"",
+            role:"minor",
+            showLabel:false
+          },
+          geometry:{type:"Point",coordinates:s.coord}
+        });
+      }
+    });
+
+    return {type:"FeatureCollection",features};
+  }
+
+  function updateReachedStops(progress) {
+    const src = map?.getSource("poi-labels");
+    if (!src) return;
+    src.setData(reachedFeatureCollection(progress));
   }
 
   function buildPlaybackPlan(durationSec) {
@@ -682,7 +710,7 @@
         type:"circle",
         source:"poi-labels",
         paint:{
-          "circle-radius":["match",["get","role"],"major",9,5],
+          "circle-radius":["match",["get","role"],"major",9,4],
           "circle-color":["match",["get","role"],"major","#f59e0b","#60a5fa"],
           "circle-stroke-width":2,
           "circle-stroke-color":"#ffffff",
@@ -694,6 +722,7 @@
         id:"poi-label-text",
         type:"symbol",
         source:"poi-labels",
+        filter:["==",["get","showLabel"],true],
         layout:{
           "text-field":["get","name"],
           "text-size":["match",["get","role"],"major",16,11],
@@ -988,6 +1017,7 @@
 
     fitOverview(false);
     updateRouteProgress(0);
+    updateReachedStops(0);
     await waitMapIdle(800);
 
     const durationSec=Number(els.duration.value)||25;
@@ -1050,6 +1080,7 @@
         const p=pointAt(info.routeP);
 
         updateRouteProgress(info.routeP);
+        updateReachedStops(info.routeP);
         updateCamera(info,p);
         drawOverlay(raw,p.coord,p.bearing,record);
         els.progress.value=record ? .18 + raw*.82 : raw;
@@ -1079,6 +1110,7 @@
               els.preview.disabled=false;els.record.disabled=false;
               activeStop = null;
               updateRouteProgress(1);
+              updateReachedStops(1);
               setTimeout(()=>fitOverview(true), 650);
               resolve();
             };
@@ -1089,6 +1121,7 @@
             els.preview.disabled=false;els.record.disabled=false;
             activeStop = null;
             updateRouteProgress(1);
+            updateReachedStops(1);
             setTimeout(()=>fitOverview(true), 650);
             resolve();
           }

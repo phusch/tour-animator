@@ -1,0 +1,6 @@
+Tour Animator V0.1.5
+
+- progressive Marker ab Erreichen
+- Tagesziele dauerhaft mit Label + N-Nummer
+- Shaping Points dauerhaft als kleine Punkte ohne Dauerschrift
+- bestehende Stop- und Kameralogik unverändert
