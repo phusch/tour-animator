@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#07111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Tour Animator">
-  <title>Tour Animator V0.1.9</title>
+  <title>Tour Animator V0.2.1</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
@@ -96,12 +96,12 @@
             </select>
           </div>
           <div class="field">
-            <label for="duration">Dauer</label>
+            <label for="duration">Fahrzeit</label>
             <select id="duration">
               <option value="15">15 Sekunden</option>
-              <option value="25" selected>25 Sekunden</option>
+              <option value="25">25 Sekunden</option>
               <option value="40">40 Sekunden</option>
-              <option value="60">1 Minute</option>
+              <option value="60" selected>1 Minute</option>
             </select>
           </div>
         </div>
@@ -119,16 +119,17 @@
             <label for="viewMode">Ansicht</label>
             <select id="viewMode">
               <option value="overview">Gesamtübersicht</option>
-              <option value="follow" selected>Sanft folgen</option>
-              <option value="close">Nah dran</option>
+              <option value="follow">Sanft folgen</option>
+              <option value="close" selected>Nah dran</option>
             </select>
           </div>
           <div class="field">
             <label for="zoomLevel">Zoom</label>
             <select id="zoomLevel">
               <option value="wide">Weit</option>
-              <option value="medium" selected>Mittel</option>
-              <option value="near">Nah</option>
+              <option value="medium">Mittel</option>
+              <option value="near" selected>Nah</option>
+              <option value="very-near">Sehr nah</option>
             </select>
           </div>
         </div>
@@ -146,8 +147,8 @@
         <div class="field">
           <label for="viaStopDuration">Zwischenziel / Shaping Point</label>
           <select id="viaStopDuration">
-            <option value="3">3 Sekunden</option>
-            <option value="4" selected>4 Sekunden</option>
+            <option value="3" selected>3 Sekunden</option>
+            <option value="4">4 Sekunden</option>
             <option value="5">5 Sekunden</option>
             <option value="6">6 Sekunden</option>
           </select>
@@ -158,7 +159,7 @@
         <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
 
         <div class="micro">
-          Die Videodauer bestimmt nur die Fahrzeit. Der Regler „Zwischenziel / Shaping Point“ steuert jetzt tatsächlich alle Zwischenstopps. Ziel-Einblendungen sind deutlich größer und bleiben für die gewählte Zeit stehen.
+          „Fahrzeit“ bestimmt ausschließlich die Bewegung des Pfeils. Die Straßenroute wird für die Animation bewusst geglättet, damit nicht jede kleine Kurve nachgefahren wird. Stopps bleiben unverändert.
         </div>
       </aside>
 
@@ -355,14 +356,21 @@
     }
 
     if (routeCoords.length < 2) throw new Error("Zu wenige gültige Routenpunkte");
+
+    const originalRoutePointCount = routeCoords.length;
+    routeCoords = simplifyAnimatedRoute(routeCoords);
+
     prepareDistanceTable();
     buildStopEvents();
     await rebuildMap();
     els.preview.disabled = false;
     els.record.disabled = false;
 
-    const snapped = (data.geometryMode || "road") === "road" && routeCoords.length > sourcePoints.length;
-    setStatus(`${sourcePoints.length} Wegpunkte · ca. ${Math.round(totalKm)} km · ${stopEvents.length} markierte Tages-/Shaping-Punkte${snapped ? " · Straßenlinie automatisch rekonstruiert" : ""}`, "ok");
+    const snapped = (data.geometryMode || "road") === "road";
+    const smoothInfo = originalRoutePointCount > routeCoords.length
+      ? ` · Animation geglättet ${originalRoutePointCount}→${routeCoords.length} Punkte`
+      : "";
+    setStatus(`${sourcePoints.length} Wegpunkte · ca. ${Math.round(totalKm)} km · ${stopEvents.length} markierte Tages-/Shaping-Punkte${snapped ? " · Straßenlinie rekonstruiert" : ""}${smoothInfo}`, "ok");
     els.renderStatus.textContent = "Bereit";
   }
 
@@ -405,6 +413,90 @@
     return (toDeg(Math.atan2(y,x))+360)%360;
   }
 
+
+  function pointLineDistanceSq(p, a, b) {
+    const x = p[0], y = p[1];
+    const x1 = a[0], y1 = a[1];
+    const x2 = b[0], y2 = b[1];
+    const dx = x2 - x1, dy = y2 - y1;
+
+    if (dx === 0 && dy === 0) {
+      const ex = x - x1, ey = y - y1;
+      return ex * ex + ey * ey;
+    }
+
+    let t = ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy);
+    t = Math.max(0, Math.min(1, t));
+
+    const px = x1 + t * dx;
+    const py = y1 + t * dy;
+    const ex = x - px, ey = y - py;
+    return ex * ex + ey * ey;
+  }
+
+  function douglasPeucker(points, toleranceDeg) {
+    if (!Array.isArray(points) || points.length <= 2) return points ? points.slice() : [];
+    const tolSq = toleranceDeg * toleranceDeg;
+
+    function simplifySection(start, end, out) {
+      let maxDist = 0;
+      let index = -1;
+      const a = points[start], b = points[end];
+
+      for (let i = start + 1; i < end; i++) {
+        const d = pointLineDistanceSq(points[i], a, b);
+        if (d > maxDist) {
+          maxDist = d;
+          index = i;
+        }
+      }
+
+      if (index > 0 && maxDist > tolSq) {
+        simplifySection(start, index, out);
+        out.pop();
+        simplifySection(index, end, out);
+      } else {
+        out.push(a, b);
+      }
+    }
+
+    const out = [];
+    simplifySection(0, points.length - 1, out);
+
+    const deduped = [];
+    for (const p of out) {
+      const prev = deduped[deduped.length - 1];
+      if (!prev || prev[0] !== p[0] || prev[1] !== p[1]) deduped.push(p);
+    }
+    return deduped;
+  }
+
+  function simplifyAnimatedRoute(coords) {
+    if (!Array.isArray(coords) || coords.length < 3) return coords ? coords.slice() : [];
+
+    let minLon=Infinity,maxLon=-Infinity,minLat=Infinity,maxLat=-Infinity;
+    for (const c of coords) {
+      minLon=Math.min(minLon,c[0]); maxLon=Math.max(maxLon,c[0]);
+      minLat=Math.min(minLat,c[1]); maxLat=Math.max(maxLat,c[1]);
+    }
+
+    const span = Math.max(maxLon-minLon, maxLat-minLat);
+    const tolerance = Math.max(0.00035, Math.min(0.0016, span * 0.00055));
+    let simplified = douglasPeucker(coords, tolerance);
+
+    const maxPoints = 650;
+    if (simplified.length > maxPoints) {
+      const sampled = [];
+      const step = (simplified.length - 1) / (maxPoints - 1);
+      for (let i = 0; i < maxPoints; i++) {
+        sampled.push(simplified[Math.round(i * step)]);
+      }
+      simplified = sampled;
+    }
+
+    return simplified;
+  }
+
   function prepareDistanceTable() {
     cumulative=[0];
     let sum=0;
@@ -415,247 +507,37 @@
     totalKm=sum;
   }
 
-  function pointAt(progress) {
+  function coordAt(progress) {
     progress=Math.max(0,Math.min(1,progress));
-    if (totalKm <= 0) return {coord:routeCoords[0],bearing:0};
+    if (totalKm <= 0) return routeCoords[0];
+
     const target=progress*totalKm;
     let lo=0, hi=cumulative.length-1;
     while(lo<hi){
       const mid=Math.floor((lo+hi)/2);
       if(cumulative[mid] < target) lo=mid+1; else hi=mid;
     }
+
     const idx=Math.max(1,lo);
     const a=routeCoords[idx-1], b=routeCoords[idx];
     const seg=Math.max(1e-9,cumulative[idx]-cumulative[idx-1]);
     const t=(target-cumulative[idx-1])/seg;
-    const coord=[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
-    return {coord,bearing:bearing(a,b)};
+    return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
   }
 
+  function pointAt(progress) {
+    progress=Math.max(0,Math.min(1,progress));
+    if (totalKm <= 0) return {coord:routeCoords[0],bearing:0};
 
-  function classifyPoint(p) {
-    const t = String(p?.type || "").toLowerCase();
-    const generic = /^(shaping point|point|wegpunkt)\b/i.test(String(p?.name || "").trim());
-    const isStart = t === "start";
-    const isEnd = t === "destination";
-    const isMajor = !!p?.day || t === "via" || t === "destination";
-    const isMinor = t === "shaping" || t === "routepoint" || t === "trkpt" || t === "wpt" || t === "gpx";
-    return {isStart, isEnd, isMajor, isMinor, generic};
-  }
+    const coord = coordAt(progress);
 
-  function stopKindLabel(stop) {
-    if (stop.role === "major") return stop.day ? `Tagesziel N${stop.day}` : "Tages-/Zwischenziel";
-    return "Shaping Point";
-  }
+    // Richtung über ein größeres Fenster bestimmen:
+    // weniger Zappeln bei engen Kurven und Serpentinen.
+    const look = Math.max(0.0025, Math.min(0.012, 3.5 / Math.max(totalKm, 1)));
+    const before = coordAt(Math.max(0, progress - look));
+    const after  = coordAt(Math.min(1, progress + look));
 
-  function displayStopName(name) {
-    const s = String(name || "").trim();
-    return s.length > 40 ? s.slice(0, 38) + "…" : s;
-  }
-
-  function snapPointToRoute(coord) {
-    if (!routeCoords.length) return null;
-    let bestIndex = 0;
-    let bestScore = Infinity;
-    for (let i = 0; i < routeCoords.length; i++) {
-      const dx = routeCoords[i][0] - coord[0];
-      const dy = routeCoords[i][1] - coord[1];
-      const score = dx * dx + dy * dy;
-      if (score < bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    }
-    return {
-      index: bestIndex,
-      coord: routeCoords[bestIndex],
-      distKm: cumulative[bestIndex] || 0
-    };
-  }
-
-  function sampleMinorStops(minor, maxCount) {
-    if (minor.length <= maxCount) return minor.slice();
-    const sampled = [];
-    const step = (minor.length - 1) / (maxCount - 1);
-    for (let i = 0; i < maxCount; i++) sampled.push(minor[Math.round(i * step)]);
-    const seen = new Set();
-    return sampled.filter(item => {
-      const key = String(item.progress.toFixed(5));
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  function buildStopEvents() {
-    stopEvents = [];
-    labelFeatures = [];
-    if (!sourcePoints.length || !routeCoords.length) return;
-
-    const raw = [];
-    for (let i = 0; i < sourcePoints.length; i++) {
-      const p = sourcePoints[i];
-      const info = classifyPoint(p);
-      if (info.isStart) continue;
-      if (!(info.isMajor || info.isMinor)) continue;
-
-      const snapped = snapPointToRoute([p.lon, p.lat]);
-      if (!snapped) continue;
-
-      const progress = totalKm > 0 ? (snapped.distKm / totalKm) : 0;
-      if (progress < 0.001) continue;
-
-      raw.push({
-        name: p.name || (info.isMajor ? "Ziel" : "Shaping Point"),
-        type: p.type || "",
-        role: info.isMajor ? "major" : "minor",
-        day: p.day ?? null,
-        generic: info.generic,
-        coord: snapped.coord,
-        progress: Math.max(0, Math.min(1, progress)),
-        distKm: snapped.distKm
-      });
-    }
-
-    raw.sort((a,b) => a.progress - b.progress);
-
-    const deduped = [];
-    for (const item of raw) {
-      const prev = deduped[deduped.length - 1];
-      const minGap = item.role === "major" ? 0.008 : 0.004;
-      if (prev && Math.abs(item.progress - prev.progress) < minGap) {
-        if (item.role === "major" && prev.role !== "major") deduped[deduped.length - 1] = item;
-        continue;
-      }
-      deduped.push(item);
-    }
-
-    const major = deduped.filter(x => x.role === "major");
-    const minor = deduped.filter(x => x.role === "minor");
-    const sampledMinor = sampleMinorStops(minor, 18);
-    const keepMinor = new Set(sampledMinor.map(x => x.name + "|" + x.progress.toFixed(5)));
-    stopEvents = deduped.filter(x => x.role === "major" || keepMinor.has(x.name + "|" + x.progress.toFixed(5)));
-
-    labelFeatures = [];
-  }
-
-  function reachedFeatureCollection(progress) {
-    const reached = stopEvents.filter(s => s.progress <= progress + 0.00001);
-    const features = [];
-
-    reached.forEach((s, i) => {
-      if (s.role === "major") {
-        features.push({
-          type:"Feature",
-          properties:{
-            id:`major-${i}`,
-            name: displayStopName(s.day ? `N${s.day} · ${s.name}` : s.name),
-            role:"major",
-            showLabel:true
-          },
-          geometry:{type:"Point",coordinates:s.coord}
-        });
-      } else {
-        features.push({
-          type:"Feature",
-          properties:{
-            id:`minor-${i}`,
-            name:"",
-            role:"minor",
-            showLabel:false
-          },
-          geometry:{type:"Point",coordinates:s.coord}
-        });
-      }
-    });
-
-    return {type:"FeatureCollection",features};
-  }
-
-  function updateReachedStops(progress) {
-    const src = map?.getSource("poi-labels");
-    if (!src) return;
-    src.setData(reachedFeatureCollection(progress));
-  }
-
-  function buildPlaybackPlan(durationSec) {
-    const usableStops = stopEvents.filter(s => s.progress > 0.01 && s.progress < 0.995);
-
-    const dayPauseBase = Math.max(3, Number(els.majorStopDuration?.value || 4));
-    const intermediatePauseBase = Math.max(3, Number(els.viaStopDuration?.value || 4));
-
-    const pauses = usableStops.map(s => ({
-      ...s,
-      // Tagesziele haben eigene Dauer.
-      // ALLE übrigen Ziele, inklusive Shaping Points, reagieren auf den Zwischenziel-Regler.
-      pauseSec: (s.role === "major" && s.day)
-        ? dayPauseBase
-        : intermediatePauseBase
-    }));
-
-    // Die gewählte Videodauer gilt nur für die reine Fahrt.
-    // Stopps werden zusätzlich angehängt.
-    const travelSec = Math.max(1.5, durationSec);
-
-    const segments = [];
-    let cursor = 0;
-    let prevProgress = 0;
-
-    for (const stop of pauses) {
-      const delta = Math.max(0, stop.progress - prevProgress);
-      const segTravel = travelSec * delta;
-
-      if (segTravel > 0.001) {
-        segments.push({
-          kind: "travel",
-          t0: cursor,
-          t1: cursor + segTravel,
-          p0: prevProgress,
-          p1: stop.progress
-        });
-        cursor += segTravel;
-      }
-
-      if (stop.pauseSec > 0.01) {
-        segments.push({
-          kind: "hold",
-          t0: cursor,
-          t1: cursor + stop.pauseSec,
-          p0: stop.progress,
-          p1: stop.progress,
-          stop
-        });
-        cursor += stop.pauseSec;
-      }
-
-      prevProgress = stop.progress;
-    }
-
-    if (prevProgress < 1) {
-      const segTravel = travelSec * (1 - prevProgress);
-      segments.push({
-        kind: "travel",
-        t0: cursor,
-        t1: cursor + segTravel,
-        p0: prevProgress,
-        p1: 1
-      });
-      cursor += segTravel;
-    }
-
-    return {segments, durationSec, travelSec, totalSec: cursor || durationSec};
-  }
-
-  function playbackState(plan, elapsedSec) {
-    const t = Math.max(0, Math.min(plan.totalSec, elapsedSec));
-    for (const seg of plan.segments) {
-      if (t <= seg.t1 + 1e-9) {
-        if (seg.kind === "hold") return {routeP: seg.p0, activeStop: seg.stop, phase: "hold"};
-        const local = seg.t1 > seg.t0 ? (t - seg.t0) / (seg.t1 - seg.t0) : 1;
-        return { routeP: seg.p0 + (seg.p1 - seg.p0) * local, activeStop: null, phase: "travel" };
-      }
-    }
-    return {routeP: 1, activeStop: null, phase: "done"};
+    return {coord,bearing:bearing(before,after)};
   }
 
   function dimsForFormat() {
@@ -852,14 +734,18 @@
   }
 
   function computeFollowZoom() {
-    const level = els.zoomLevel?.value || "medium";
+    const level = els.zoomLevel?.value || "near";
     const base =
       totalKm > 800 ? 7.9 :
       totalKm > 350 ? 8.5 :
       totalKm > 120 ? 9.2 :
       10.0;
 
-    const delta = level === "wide" ? -0.7 : level === "near" ? 0.8 : 0;
+    const delta =
+      level === "wide" ? -0.7 :
+      level === "near" ? 0.8 :
+      level === "very-near" ? 1.45 :
+      0;
     return base + delta;
   }
 
@@ -871,7 +757,7 @@
   function updateCamera(info, point) {
     if(!map) return;
 
-    const mode = els.viewMode?.value || "follow";
+    const mode = els.viewMode?.value || "close";
 
     if (mode === "overview") {
       return; // Karte bleibt exakt in der Gesamtansicht.
@@ -1106,7 +992,7 @@
     updateReachedStops(0);
     await waitMapIdle(800);
 
-    const durationSec=Number(els.duration.value)||25;
+    const durationSec=Number(els.duration.value)||60;
     const playbackPlan = buildPlaybackPlan(durationSec);
 
     if ((els.viewMode?.value || "follow") === "overview") {
@@ -1268,7 +1154,7 @@
   });
   els.majorStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;
-    els.renderStatus.textContent = `Tagesziel: ${els.majorStopDuration.value}s · Zwischenziel/Shaping: ${els.viaStopDuration?.value || 4}s`;
+    els.renderStatus.textContent = `Tagesziel: ${els.majorStopDuration.value}s · Zwischenziel/Shaping: ${els.viaStopDuration?.value || 3}s`;
   });
   els.viaStopDuration?.addEventListener("change",()=>{
     if(!map || !routeCoords.length) return;

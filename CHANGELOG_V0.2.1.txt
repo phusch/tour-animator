@@ -1,0 +1,7 @@
+Tour Animator V0.2.1
+
+- Route vor Animation geglättet
+- Douglas-Peucker-Vereinfachung plus max. 650 Punkte
+- Pfeilrichtung geglättet
+- weniger nervöse Kurven-/Serpentinenverfolgung
+- Ziel-/Stopplogik unverändert
