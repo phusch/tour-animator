@@ -1,0 +1,9 @@
+Tour Animator V0.2.0
+
+- neue Zoomstufe: Sehr nah
+- Standard Fahrzeit: 60 Sekunden
+- Standard Ansicht: Nah dran
+- Standard Zoom: Nah
+- Standard Tagesziel: 4 Sekunden
+- Standard Zwischenziel/Shaping: 3 Sekunden
+- UI-Bezeichnung 'Dauer' -> 'Fahrzeit'
