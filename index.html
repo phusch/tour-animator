@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tour Animator">
+  <title>Tour Animator</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+
+  <style>
+    :root{
+      --bg:#07111f;--panel:#0e1b2d;--panel2:#12233a;--text:#f7f8fb;--muted:#a8b4c7;
+      --purple:#7c3aed;--purple2:#5b20d6;--green:#22c55e;--line:#263c58;--danger:#ef4444;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:linear-gradient(180deg,#06101d,#0a1626);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif}
+    body{min-height:100vh}
+    button,select,input{font:inherit}
+    .app{max-width:1180px;margin:0 auto;padding:18px 16px 40px}
+    header{display:flex;gap:14px;align-items:center;margin-bottom:16px}
+    .logo{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,var(--purple),#2563eb);font-size:29px;box-shadow:0 12px 28px rgba(91,32,214,.28)}
+    h1{font-size:clamp(28px,5vw,44px);line-height:1;margin:0;font-weight:900;letter-spacing:-.04em}
+    .subtitle{color:var(--muted);margin-top:5px}
+    .layout{display:grid;grid-template-columns:330px 1fr;gap:16px;align-items:start}
+    .panel{background:rgba(14,27,45,.94);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 16px 50px rgba(0,0,0,.22)}
+    .panel h2{font-size:16px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.08em;color:#d9e3f4}
+    .source{border:1px solid #315071;background:#0b1727;border-radius:16px;padding:14px;margin-bottom:14px}
+    .source strong{display:block;font-size:17px;margin-bottom:4px}
+    .status{font-size:13px;line-height:1.45;color:var(--muted)}
+    .status.ok{color:#9be9b3}
+    .status.warn{color:#ffd88a}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    label{display:block;color:#c9d4e4;font-size:12px;font-weight:800;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+    select,input[type=file]{width:100%;border:1px solid #35506f;background:#091522;color:white;border-radius:12px;padding:11px}
+    .field{margin-bottom:13px}
+    .divider{height:1px;background:var(--line);margin:14px 0}
+    .btn{width:100%;border:0;border-radius:14px;padding:14px 16px;font-weight:900;cursor:pointer}
+    .btn.primary{background:linear-gradient(135deg,#8b5cf6,#5b20d6);color:white;box-shadow:0 10px 24px rgba(91,32,214,.3)}
+    .btn.secondary{background:#172a43;color:white;border:1px solid #35506f;margin-top:9px}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .micro{font-size:12px;color:var(--muted);line-height:1.45;margin-top:9px}
+    .stage-panel{padding:12px}
+    .stage-shell{position:relative;width:100%;overflow:hidden;border-radius:16px;background:black;border:1px solid #243a55;box-shadow:0 16px 40px rgba(0,0,0,.28)}
+    #stage{position:absolute;left:0;top:0;transform-origin:0 0;background:#02050a}
+    #map{position:absolute;inset:0}
+    #overlay{position:absolute;inset:0;pointer-events:none}
+    .stage-placeholder{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:28px;color:#8ea0b8;background:radial-gradient(circle at 50% 20%,rgba(91,32,214,.2),transparent 38%),#02060c}
+    .stage-placeholder b{display:block;color:white;font-size:21px;margin-bottom:5px}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+    .badge{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:7px 10px;background:#0a1829;border:1px solid #2b4564;color:#cbd8e8;font-size:12px}
+    .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+    progress{width:180px;max-width:34vw;height:8px;border:0}
+    .hidden{display:none!important}
+    @media(max-width:860px){
+      .layout{grid-template-columns:1fr}
+      .panel{order:2}.stage-panel{order:1}
+      header{padding-top:env(safe-area-inset-top)}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">🎬</div>
+      <div>
+        <h1>Tour Animator</h1>
+        <div class="subtitle">Tour Navigator → Kartenanimation → Video</div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="panel">
+        <h2>Tour</h2>
+        <div class="source">
+          <strong id="routeTitle">Noch keine Tour geladen</strong>
+          <div id="routeStatus" class="status">Öffne die App über „Tour animieren“ im Tour Navigator oder lade unten eine GPX-Datei.</div>
+        </div>
+
+        <div class="field">
+          <label for="gpxInput">GPX als Alternative</label>
+          <input id="gpxInput" type="file" accept=".gpx,application/gpx+xml,text/xml,application/xml">
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="row">
+          <div class="field">
+            <label for="format">Format</label>
+            <select id="format">
+              <option value="16:9" selected>16:9 · Full HD</option>
+              <option value="9:16">9:16 · Hochformat</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="duration">Dauer</label>
+            <select id="duration">
+              <option value="15">15 Sekunden</option>
+              <option value="25" selected>25 Sekunden</option>
+              <option value="40">40 Sekunden</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="mapStyle">Kartenstil</label>
+          <select id="mapStyle">
+            <option value="road" selected>Straße</option>
+            <option value="satellite">Satellit</option>
+          </select>
+        </div>
+
+        <button id="previewBtn" class="btn primary" disabled>▶ Vorschau</button>
+        <button id="recordBtn" class="btn secondary" disabled>⬇ Video erstellen</button>
+
+        <div class="micro">
+          Kamera, Zoom, Linienführung und Motorradmarker laufen automatisch. Bei Tour-Navigator-Wegpunkten wird die Straßenlinie automatisch aus den Koordinaten rekonstruiert.
+        </div>
+      </aside>
+
+      <section class="panel stage-panel">
+        <div id="stageShell" class="stage-shell">
+          <div id="stage">
+            <div id="map"></div>
+            <canvas id="overlay"></canvas>
+          </div>
+          <div id="placeholder" class="stage-placeholder">
+            <div><b>Bereit für deine Tour</b>Die Animation übernimmt die Route direkt aus dem Tour Navigator.</div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <span class="badge"><span class="dot"></span><span id="renderStatus">Bereit</span></span>
+          <progress id="progress" max="1" value="0"></progress>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <canvas id="recordCanvas" class="hidden"></canvas>
+
+<script>
+(() => {
+  const STORAGE_KEYS = [
+    "tourNavigator.animationRoute",
+    "tourNavigator.currentRoute"
+  ];
+
+  const els = {
+    title: document.getElementById("routeTitle"),
+    status: document.getElementById("routeStatus"),
+    gpx: document.getElementById("gpxInput"),
+    format: document.getElementById("format"),
+    duration: document.getElementById("duration"),
+    style: document.getElementById("mapStyle"),
+    preview: document.getElementById("previewBtn"),
+    record: document.getElementById("recordBtn"),
+    shell: document.getElementById("stageShell"),
+    stage: document.getElementById("stage"),
+    map: document.getElementById("map"),
+    overlay: document.getElementById("overlay"),
+    placeholder: document.getElementById("placeholder"),
+    renderStatus: document.getElementById("renderStatus"),
+    progress: document.getElementById("progress"),
+    recordCanvas: document.getElementById("recordCanvas")
+  };
+
+  let payload = null;
+  let routeCoords = [];
+  let sourcePoints = [];
+  let routeMeta = {title:"Tour", source:""};
+  let map = null;
+  let frameId = null;
+  let playing = false;
+  let dimensions = {w:1920,h:1080};
+  let totalKm = 0;
+  let cumulative = [];
+
+  const ROAD_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+  const SATELLITE_STYLE = {
+    version: 8,
+    sources: {
+      esri: {
+        type: "raster",
+        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        attribution: "Tiles © Esri"
+      }
+    },
+    layers: [{id:"satellite",type:"raster",source:"esri"}]
+  };
+
+  function setStatus(text, cls="") {
+    els.status.textContent = text;
+    els.status.className = "status " + cls;
+  }
+
+  function validPoint(p) {
+    const lat = Number(p?.lat), lon = Number(p?.lon ?? p?.lng);
+    return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+  }
+
+  function normalizePoints(points) {
+    return (Array.isArray(points) ? points : [])
+      .filter(validPoint)
+      .map((p,i) => ({
+        lat: Number(p.lat),
+        lon: Number(p.lon ?? p.lng),
+        name: String(p.name || p.q || `Punkt ${i+1}`),
+        type: String(p.type || "")
+      }));
+  }
+
+  function routeTitleFrom(points, explicit="") {
+    if (explicit && String(explicit).trim()) return String(explicit).trim();
+    if (!points.length) return "Tour";
+    const first = points[0]?.name || "Start";
+    const last = points[points.length - 1]?.name || "Ziel";
+    return `${first} → ${last}`;
+  }
+
+  function readSharedRoute() {
+    for (const key of STORAGE_KEYS) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const data = JSON.parse(raw);
+        const points = normalizePoints(Array.isArray(data) ? data : data.points);
+        if (points.length >= 2) {
+          return {
+            points,
+            title: routeTitleFrom(points, data.title),
+            source: data.source || "Tour Navigator",
+            geometryMode: data.geometryMode || "road",
+            exportedAt: data.exportedAt || null
+          };
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function parseGpx(text) {
+    const xml = new DOMParser().parseFromString(text, "application/xml");
+    if (xml.querySelector("parsererror")) throw new Error("Ungültige GPX-Datei");
+
+    const byLocalName = (name) => Array.from(xml.getElementsByTagName("*")).filter(n => n.localName === name);
+    let nodes = byLocalName("trkpt");
+    let kind = "Track";
+    if (!nodes.length) { nodes = byLocalName("rtept"); kind = "Route"; }
+    if (!nodes.length) { nodes = byLocalName("wpt"); kind = "Wegpunkte"; }
+    if (nodes.length < 2) throw new Error("Mindestens zwei GPX-Punkte erforderlich");
+
+    const getName = (n, i) => {
+      const child = Array.from(n.children || []).find(c => c.localName === "name");
+      return (child?.textContent || `${kind} ${i+1}`).trim();
+    };
+
+    let points = nodes.map((n,i) => ({
+      lat: Number(n.getAttribute("lat")),
+      lon: Number(n.getAttribute("lon")),
+      name: getName(n,i),
+      type: "gpx"
+    })).filter(validPoint);
+
+    if (points.length > 2500) {
+      const sampled = [];
+      const step = (points.length - 1) / 2499;
+      for (let i=0;i<2500;i++) sampled.push(points[Math.round(i*step)]);
+      points = sampled;
+    }
+    return {points, title: routeTitleFrom(points), source:`GPX · ${kind}`, geometryMode:"exact"};
+  }
+
+  async function loadPayload(data) {
+    stopAnimation();
+    payload = data;
+    sourcePoints = normalizePoints(data.points);
+    routeMeta = {
+      title: routeTitleFrom(sourcePoints, data.title),
+      source: data.source || "Tour"
+    };
+
+    els.title.textContent = routeMeta.title;
+    setStatus(`${sourcePoints.length} Punkte · ${routeMeta.source}. Route wird vorbereitet …`);
+    els.renderStatus.textContent = "Route wird aufgebaut";
+    els.progress.value = 0;
+    els.placeholder.classList.add("hidden");
+
+    try {
+      if ((data.geometryMode || "road") === "road") {
+        routeCoords = await roadRoute(sourcePoints);
+      } else {
+        routeCoords = sourcePoints.map(p => [p.lon,p.lat]);
+      }
+    } catch (err) {
+      routeCoords = sourcePoints.map(p => [p.lon,p.lat]);
+      setStatus(`Straßenrouting nicht erreichbar – Wegpunkte werden direkt verbunden. ${err.message || err}`, "warn");
+    }
+
+    if (routeCoords.length < 2) throw new Error("Zu wenige gültige Routenpunkte");
+    prepareDistanceTable();
+    await rebuildMap();
+    els.preview.disabled = false;
+    els.record.disabled = false;
+
+    const snapped = (data.geometryMode || "road") === "road" && routeCoords.length > sourcePoints.length;
+    setStatus(`${sourcePoints.length} Wegpunkte · ca. ${Math.round(totalKm)} km${snapped ? " · Straßenlinie automatisch rekonstruiert" : ""}`, "ok");
+    els.renderStatus.textContent = "Bereit";
+  }
+
+  async function roadRoute(points) {
+    let sampled = points;
+    if (points.length > 80) {
+      sampled = [];
+      const step = (points.length - 1) / 79;
+      for (let i=0;i<80;i++) sampled.push(points[Math.round(i*step)]);
+    }
+    const coords = sampled.map(p => `${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(";");
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
+    try {
+      const res = await fetch(url, {signal: ctl.signal});
+      if (!res.ok) throw new Error(`Routing ${res.status}`);
+      const json = await res.json();
+      const geometry = json?.routes?.[0]?.geometry?.coordinates;
+      if (!Array.isArray(geometry) || geometry.length < 2) throw new Error("Keine Straßenroute gefunden");
+      return geometry;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function havKm(a,b) {
+    const R=6371, toRad=x=>x*Math.PI/180;
+    const [lon1,lat1]=a,[lon2,lat2]=b;
+    const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+    const q=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));
+  }
+
+  function bearing(a,b) {
+    const toRad=x=>x*Math.PI/180, toDeg=x=>x*180/Math.PI;
+    const [lon1,lat1]=a,[lon2,lat2]=b;
+    const y=Math.sin(toRad(lon2-lon1))*Math.cos(toRad(lat2));
+    const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2))-Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+    return (toDeg(Math.atan2(y,x))+360)%360;
+  }
+
+  function prepareDistanceTable() {
+    cumulative=[0];
+    let sum=0;
+    for(let i=1;i<routeCoords.length;i++){
+      sum += havKm(routeCoords[i-1],routeCoords[i]);
+      cumulative.push(sum);
+    }
+    totalKm=sum;
+  }
+
+  function pointAt(progress) {
+    progress=Math.max(0,Math.min(1,progress));
+    if (totalKm <= 0) return {coord:routeCoords[0],bearing:0};
+    const target=progress*totalKm;
+    let lo=0, hi=cumulative.length-1;
+    while(lo<hi){
+      const mid=Math.floor((lo+hi)/2);
+      if(cumulative[mid] < target) lo=mid+1; else hi=mid;
+    }
+    const idx=Math.max(1,lo);
+    const a=routeCoords[idx-1], b=routeCoords[idx];
+    const seg=Math.max(1e-9,cumulative[idx]-cumulative[idx-1]);
+    const t=(target-cumulative[idx-1])/seg;
+    const coord=[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+    return {coord,bearing:bearing(a,b)};
+  }
+
+  function dimsForFormat() {
+    return els.format.value === "9:16" ? {w:1080,h:1920} : {w:1920,h:1080};
+  }
+
+  function layoutStage() {
+    dimensions=dimsForFormat();
+    els.stage.style.width=dimensions.w+"px";
+    els.stage.style.height=dimensions.h+"px";
+    els.overlay.width=dimensions.w;
+    els.overlay.height=dimensions.h;
+    els.recordCanvas.width=dimensions.w;
+    els.recordCanvas.height=dimensions.h;
+
+    const shellW=els.shell.clientWidth || 800;
+    const scale=shellW/dimensions.w;
+    const shellH=dimensions.h*scale;
+    els.shell.style.height=shellH+"px";
+    els.stage.style.transform=`scale(${scale})`;
+  }
+
+  async function rebuildMap() {
+    layoutStage();
+    if (map) { try{map.remove()}catch(_){} map=null; }
+    els.map.innerHTML="";
+
+    map = new maplibregl.Map({
+      container:"map",
+      style: els.style.value === "satellite" ? SATELLITE_STYLE : ROAD_STYLE,
+      center: routeCoords[0] || [9,48],
+      zoom: 6,
+      bearing: 0,
+      pitch: 0,
+      attributionControl: false,
+      fadeDuration: 0,
+      preserveDrawingBuffer: true,
+      interactive: false
+    });
+
+    await new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>resolve(),12000);
+      map.once("load",()=>{clearTimeout(timeout);resolve()});
+      map.once("error",e=>{ /* map can still work after tile/style errors */ });
+    });
+
+    if (!map.getSource("route")) {
+      map.addSource("route", {
+        type:"geojson",
+        lineMetrics:true,
+        data:{type:"Feature",geometry:{type:"LineString",coordinates:routeCoords}}
+      });
+      map.addLayer({
+        id:"route-ghost",
+        type:"line",
+        source:"route",
+        paint:{
+          "line-color":"rgba(255,255,255,0.38)",
+          "line-width":8,
+          "line-opacity":0.55
+        },
+        layout:{"line-cap":"round","line-join":"round"}
+      });
+      map.addLayer({
+        id:"route-progress",
+        type:"line",
+        source:"route",
+        paint:{
+          "line-width":12,
+          "line-opacity":1,
+          "line-gradient":[
+            "interpolate",["linear"],["line-progress"],
+            0,"#7c3aed",
+            0.0001,"#7c3aed",
+            0.0002,"rgba(124,58,237,0)",
+            1,"rgba(124,58,237,0)"
+          ]
+        },
+        layout:{"line-cap":"round","line-join":"round"}
+      });
+    }
+
+    const ends = {
+      type:"FeatureCollection",
+      features:[
+        {type:"Feature",properties:{kind:"start"},geometry:{type:"Point",coordinates:routeCoords[0]}},
+        {type:"Feature",properties:{kind:"end"},geometry:{type:"Point",coordinates:routeCoords[routeCoords.length-1]}}
+      ]
+    };
+    map.addSource("ends",{type:"geojson",data:ends});
+    map.addLayer({
+      id:"ends",
+      type:"circle",
+      source:"ends",
+      paint:{
+        "circle-radius":12,
+        "circle-color":["match",["get","kind"],"start","#22c55e","#ef4444"],
+        "circle-stroke-width":4,
+        "circle-stroke-color":"#ffffff"
+      }
+    });
+
+    fitOverview(false);
+    await waitMapIdle(4000);
+    drawOverlay(0, routeCoords[0], 0, false);
+  }
+
+  function routeBounds() {
+    const b = new maplibregl.LngLatBounds(routeCoords[0], routeCoords[0]);
+    routeCoords.forEach(c=>b.extend(c));
+    return b;
+  }
+
+  function fitOverview(animated=true) {
+    if(!map || !routeCoords.length) return;
+    map.fitBounds(routeBounds(),{
+      padding: dimensions.w > dimensions.h ? 140 : 110,
+      duration:animated?900:0,
+      pitch:0,
+      bearing:0,
+      maxZoom:10
+    });
+  }
+
+  function waitMapIdle(maxMs=2500) {
+    return new Promise(resolve=>{
+      if(!map) return resolve();
+      let done=false;
+      const finish=()=>{if(done)return;done=true;clearTimeout(t);resolve()};
+      const t=setTimeout(finish,maxMs);
+      map.once("idle",finish);
+    });
+  }
+
+  function eased(t) {
+    return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
+  }
+
+  function timeline(raw) {
+    const intro=.12, outro=.12;
+    if(raw < intro) {
+      const t=eased(raw/intro);
+      return {routeP:0, phase:"intro", t};
+    }
+    if(raw > 1-outro) {
+      const t=eased((raw-(1-outro))/outro);
+      return {routeP:1, phase:"outro", t};
+    }
+    const t=(raw-intro)/(1-intro-outro);
+    return {routeP:eased(t), phase:"ride", t};
+  }
+
+  function updateRouteGradient(progress) {
+    const p=Math.max(0.0001,Math.min(.9999,progress));
+    if(!map?.getLayer("route-progress")) return;
+    map.setPaintProperty("route-progress","line-gradient",[
+      "interpolate",["linear"],["line-progress"],
+      0,"#7c3aed",
+      p,"#7c3aed",
+      Math.min(1,p+.0001),"rgba(124,58,237,0)",
+      1,"rgba(124,58,237,0)"
+    ]);
+  }
+
+  function computeFollowZoom() {
+    if(totalKm > 800) return 8.7;
+    if(totalKm > 350) return 9.25;
+    if(totalKm > 120) return 10.0;
+    return 10.8;
+  }
+
+  function updateCamera(info, point) {
+    if(!map) return;
+    const followZoom=computeFollowZoom();
+
+    if(info.phase==="intro") {
+      const start=routeCoords[0];
+      const z=map.getZoom();
+      map.jumpTo({
+        center:start,
+        zoom: Math.max(5.8, followZoom-2.6 + info.t*2.6),
+        pitch: 42*info.t,
+        bearing: point.bearing*info.t
+      });
+    } else if(info.phase==="ride") {
+      map.jumpTo({
+        center:point.coord,
+        zoom:followZoom,
+        pitch:42,
+        bearing:point.bearing
+      });
+    } else {
+      if(info.t < .25) {
+        map.jumpTo({center:point.coord,zoom:followZoom-1.1*info.t,pitch:42*(1-info.t),bearing:point.bearing*(1-info.t)});
+      } else {
+        // For the final second(s), progressively relax to a route overview.
+        const b=routeBounds();
+        const center=b.getCenter();
+        const current=point.coord;
+        const k=(info.t-.25)/.75;
+        map.jumpTo({
+          center:[current[0]+(center.lng-current[0])*k,current[1]+(center.lat-current[1])*k],
+          zoom:Math.max(4.5,followZoom-(4.3*k)),
+          pitch:42*(1-k),
+          bearing:point.bearing*(1-k)
+        });
+      }
+    }
+  }
+
+  function drawBike(ctx,x,y,heading,scale=1) {
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(heading*Math.PI/180);
+    ctx.scale(scale,scale);
+
+    ctx.shadowColor="rgba(0,0,0,.5)";
+    ctx.shadowBlur=18;
+    ctx.shadowOffsetY=8;
+
+    ctx.fillStyle="rgba(5,12,22,.94)";
+    ctx.beginPath(); ctx.arc(0,0,36,0,Math.PI*2); ctx.fill();
+
+    ctx.shadowColor="transparent";
+    ctx.strokeStyle="#ffffff";
+    ctx.lineWidth=6;
+    ctx.lineCap="round";
+    // Wheels
+    ctx.beginPath(); ctx.arc(-13,12,9,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(13,12,9,0,Math.PI*2); ctx.stroke();
+    // Frame
+    ctx.beginPath();
+    ctx.moveTo(-13,12);ctx.lineTo(-4,-2);ctx.lineTo(12,12);
+    ctx.moveTo(-4,-2);ctx.lineTo(3,12);
+    ctx.moveTo(-4,-2);ctx.lineTo(9,-7);
+    ctx.moveTo(9,-7);ctx.lineTo(13,12);
+    ctx.stroke();
+    // Direction arrow / rider
+    ctx.fillStyle="#a78bfa";
+    ctx.beginPath();ctx.moveTo(0,-31);ctx.lineTo(-9,-14);ctx.lineTo(9,-14);ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
+
+  function drawOverlay(progress, coord, heading, recording=false) {
+    const canvas=els.overlay, ctx=canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(!map || !coord) return;
+
+    const projected=map.project(coord);
+    const scale=recording ? 1 : 1;
+    drawBike(ctx,projected.x,projected.y,heading,dimensions.w/1920);
+
+    // Bottom title panel, deliberately minimal.
+    const pad=dimensions.w*0.035;
+    const barH=dimensions.h*(dimensions.h>dimensions.w?.078:.095);
+    const y=dimensions.h-barH-pad;
+    ctx.save();
+    ctx.fillStyle="rgba(4,10,18,.72)";
+    roundRect(ctx,pad,y,Math.min(dimensions.w*.72,1200),barH,18*(dimensions.w/1920));
+    ctx.fill();
+
+    const fs=Math.max(24,dimensions.w*(dimensions.h>dimensions.w?.028:.022));
+    ctx.fillStyle="#fff";
+    ctx.font=`800 ${fs}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+    ctx.textBaseline="middle";
+    const title=routeMeta.title.length>48 ? routeMeta.title.slice(0,46)+"…" : routeMeta.title;
+    ctx.fillText(title,pad+26,y+barH*.40);
+
+    ctx.fillStyle="rgba(255,255,255,.72)";
+    ctx.font=`600 ${Math.max(18,fs*.52)}px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif`;
+    ctx.fillText(`${Math.round(totalKm)} km · Tour Animator`,pad+26,y+barH*.72);
+    ctx.restore();
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();
+  }
+
+  async function preloadRoute() {
+    if(!map || !routeCoords.length) return;
+    els.renderStatus.textContent="Kartenmaterial vorbereiten";
+    const steps=14;
+    for(let i=0;i<steps;i++){
+      const p=pointAt(i/(steps-1));
+      map.jumpTo({center:p.coord,zoom:computeFollowZoom(),pitch:42,bearing:p.bearing});
+      els.progress.value=i/(steps-1)*.18;
+      await new Promise(r=>setTimeout(r,110));
+    }
+    await waitMapIdle(2200);
+  }
+
+  function stopAnimation() {
+    playing=false;
+    if(frameId) cancelAnimationFrame(frameId);
+    frameId=null;
+  }
+
+  async function play({record=false}={}) {
+    if(!map || routeCoords.length<2 || playing) return;
+    stopAnimation();
+    playing=true;
+    els.preview.disabled=true;
+    els.record.disabled=true;
+    els.progress.value=0;
+
+    if(record) await preloadRoute();
+
+    const durationSec=Number(els.duration.value)||25;
+    const start=performance.now();
+    let recorder=null, chunks=[], mimeType="", ext="webm";
+
+    if(record) {
+      const rc=els.recordCanvas, rctx=rc.getContext("2d");
+      const stream=rc.captureStream(30);
+      const preferred=[
+        'video/mp4;codecs="avc1.42E01E"',
+        "video/mp4",
+        'video/webm;codecs="vp9"',
+        'video/webm;codecs="vp8"',
+        "video/webm"
+      ];
+      mimeType=preferred.find(t=>window.MediaRecorder?.isTypeSupported?.(t)) || "";
+      ext=mimeType.includes("mp4") ? "mp4" : "webm";
+      try{
+        recorder=new MediaRecorder(stream,mimeType?{mimeType,videoBitsPerSecond:12000000}:{videoBitsPerSecond:12000000});
+      }catch(err){
+        playing=false;
+        els.preview.disabled=false;
+        els.record.disabled=false;
+        throw new Error("Dieser Browser kann die Videoaufnahme nicht starten. Bitte Chrome oder Edge am Mac/PC verwenden.");
+      }
+      recorder.ondataavailable=e=>{if(e.data?.size)chunks.push(e.data)};
+      recorder.start(250);
+      els.renderStatus.textContent=`Aufnahme läuft · ${dimensions.w}×${dimensions.h}`;
+    } else {
+      els.renderStatus.textContent="Vorschau läuft";
+    }
+
+    return new Promise((resolve,reject)=>{
+      const step=(now)=>{
+        if(!playing){
+          try{recorder?.stop()}catch(_){}
+          return resolve();
+        }
+        const raw=Math.min(1,(now-start)/(durationSec*1000));
+        const info=timeline(raw);
+        const p=pointAt(info.routeP);
+
+        updateRouteGradient(info.routeP);
+        updateCamera(info,p);
+        drawOverlay(raw,p.coord,p.bearing,record);
+        els.progress.value=record ? .18 + raw*.82 : raw;
+
+        if(record){
+          const rctx=els.recordCanvas.getContext("2d");
+          rctx.fillStyle="#000";rctx.fillRect(0,0,dimensions.w,dimensions.h);
+          try{
+            rctx.drawImage(map.getCanvas(),0,0,dimensions.w,dimensions.h);
+            rctx.drawImage(els.overlay,0,0,dimensions.w,dimensions.h);
+          }catch(err){}
+        }
+
+        if(raw>=1){
+          playing=false;
+          if(record){
+            recorder.onstop=()=>{
+              const blob=new Blob(chunks,{type:mimeType || "video/webm"});
+              const a=document.createElement("a");
+              const clean=(routeMeta.title||"Tour").replace(/[^\wäöüÄÖÜß-]+/g,"_").replace(/^_+|_+$/g,"");
+              a.href=URL.createObjectURL(blob);
+              a.download=`${clean || "Tour"}_Animation.${ext}`;
+              document.body.appendChild(a);a.click();a.remove();
+              setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+              els.renderStatus.textContent=`Video fertig · ${ext.toUpperCase()}`;
+              els.progress.value=1;
+              els.preview.disabled=false;els.record.disabled=false;
+              fitOverview(true);
+              resolve();
+            };
+            recorder.stop();
+          } else {
+            els.renderStatus.textContent="Vorschau beendet";
+            els.progress.value=1;
+            els.preview.disabled=false;els.record.disabled=false;
+            fitOverview(true);
+            resolve();
+          }
+          return;
+        }
+        frameId=requestAnimationFrame(step);
+      };
+      frameId=requestAnimationFrame(step);
+    });
+  }
+
+  els.preview.addEventListener("click",()=>play({record:false}).catch(err=>alert(err.message||err)));
+  els.record.addEventListener("click",()=>play({record:true}).catch(err=>{
+    els.renderStatus.textContent="Fehler";
+    els.preview.disabled=false;els.record.disabled=false;
+    alert(err.message||err);
+  }));
+
+  els.gpx.addEventListener("change", async e=>{
+    const f=e.target.files?.[0]; if(!f)return;
+    try{
+      const parsed=parseGpx(await f.text());
+      await loadPayload(parsed);
+    }catch(err){alert("GPX konnte nicht geladen werden: "+(err.message||err))}
+  });
+
+  els.format.addEventListener("change",()=>{ if(routeCoords.length) rebuildMap(); else layoutStage(); });
+  els.style.addEventListener("change",()=>{ if(routeCoords.length) rebuildMap(); });
+  window.addEventListener("resize",()=>layoutStage());
+
+  layoutStage();
+  const shared=readSharedRoute();
+  if(shared){
+    loadPayload(shared).catch(err=>{
+      els.placeholder.classList.remove("hidden");
+      setStatus("Route konnte nicht geladen werden: "+(err.message||err),"warn");
+    });
+  }
+})();
+</script>
+</body>
+</html>
